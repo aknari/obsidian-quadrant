@@ -1,0 +1,18 @@
+{
+  "name": "quadrant",
+  "version": "0.4.0",
+  "private": true,
+  "scripts": {
+    "build": "esbuild src/main.ts --bundle --external:obsidian --format=cjs --platform=browser --target=es2020 --outfile=dist/main.js",
+    "deploy": "npm run build && out=\"${OBSIDIAN_PLUGIN_DIR:-/Users/aknari/store/vault/.obsidian/plugins/quadrant}\" && mkdir -p \"$out\" && cp dist/main.js manifest.json styles.css \"$out/\"",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run test:model && npm run test:plugin",
+    "test:model": "esbuild test/model.test.ts --bundle --platform=node --format=cjs --outfile=.test/model.test.cjs && node .test/model.test.cjs",
+    "test:plugin": "esbuild test/plugin.test.ts --bundle --platform=node --format=cjs --alias:obsidian=./test/obsidian-stub --outfile=.test/plugin.test.cjs && node .test/plugin.test.cjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0"
+  }
+}

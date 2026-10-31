@@ -37,6 +37,7 @@ import {
   sortTasks,
   taskKey,
   todayOf,
+  toggleCondition,
   windowLabel,
   type MatrixTask,
 } from "../src/model";
@@ -275,6 +276,9 @@ const sorted = sortTasks([
 ]);
 check("Operon priority orders the lane, S first", sorted.map((line) => line.title), ["S", "A", "C", "Sin prioridad"]);
 
+const byEmoji = sortTasks([task("- [ ] Sin #task"), task("- [ ] Emoji #task 🔼", 1)]);
+check("a plain task with an emoji sorts by its rank, not with the ones that have none", byEmoji.map((line) => line.title), ["Emoji", "Sin"]);
+
 check("an out-of-range quadrant is not a quadrant", quadrantOf("- [ ] X [eisenhower:: 9]"), null);
 
 console.log("\nNarrowing the board");
@@ -286,6 +290,7 @@ const thisWeek = task("- [ ] Semana #task ⏳ 2026-10-30", 2);
 const later = task("- [ ] Diciembre #task ⏳ 2026-12-01", 3);
 const urgent = task("- [ ] Urgente #task {{operonId:: u}} {{priority:: S}}", 4);
 const lateAndUrgent = task("- [ ] Ambas #task ⏳ 2026-10-20 {{operonId:: a}} {{priority:: A}}", 5);
+const starred = task("- [ ] Destacada #task 🔺 ➕ 2026-10-27", 6);
 
 check("today is a local calendar day", todayOf(new Date(2026, 9, 28, 23, 30)), "2026-10-28");
 check("a week ahead crosses the month", addDays("2026-10-28", 7), "2026-11-04");
@@ -313,6 +318,28 @@ check(
 );
 check("a task with no date is never overdue", matchesFilter(task("- [ ] Sin fecha #task"), { ...NO_FILTER, overdue: true }, TODAY), false);
 check("nor does it count as due soon", matchesFilter(task("- [ ] Sin fecha #task"), { ...NO_FILTER, soon: true }, TODAY), false);
+
+check(
+  "the emoji of a plain task is read as a priority",
+  [starred.priority, task("- [ ] X #task ⏫").priority, task("- [ ] X #task 🔼").priority],
+  ["S", "A", "B"],
+);
+check("and it is not part of the title", starred.title, "Destacada");
+check("Operon's field wins when both are there", task("- [ ] X {{operonId:: e}} {{priority:: C}} ⏫").priority, "C");
+check("no emoji and no field means no priority", task("- [ ] X #task").priority, null);
+check("the priority condition reads the emoji too", matchesFilter(starred, { ...NO_FILTER, priority: true }, TODAY), true);
+
+check(
+  "overdue and next 7 days cannot be on together",
+  toggleCondition({ ...NO_FILTER, overdue: true }, "soon"),
+  { overdue: false, soon: true, priority: false },
+);
+check("a second click on the same chip clears it", toggleCondition({ ...NO_FILTER, soon: true }, "soon"), NO_FILTER);
+check(
+  "priority adds to a deadline condition",
+  toggleCondition({ ...NO_FILTER, overdue: true }, "priority"),
+  { overdue: true, soon: false, priority: true },
+);
 
 if (failed > 0) {
   console.error(`\n${failed} check(s) failed`);

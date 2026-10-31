@@ -1,7 +1,7 @@
 {
   "id": "quadrant",
   "name": "Quadrant",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "minAppVersion": "1.5.0",
   "description": "An Eisenhower matrix over the tasks already in your vault, shown in the right sidebar, in a tab, or inside a note. Four quadrants, an inbox and a dropped lane, written back to the task line.",
   "author": "T. Bautista",

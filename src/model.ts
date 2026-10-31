@@ -202,7 +202,7 @@ export function parseTaskLine(raw: string, path: string, line: number): MatrixTa
     done: mark === "x" || mark === "X",
     operonId: operonIdOf(raw),
     operonStatus: readField(raw, "status"),
-    priority: readField(raw, "priority"),
+    priority: priorityOf(raw),
     quadrant: quadrantOf(raw),
     tags: tagsOf(raw),
     scheduled: scheduledOf(raw, rest),
@@ -304,6 +304,37 @@ export function plainTaskVisible(task: MatrixTask, folders: string[]): boolean {
   return folders.some((folder) => inFolder(task.path, folder));
 }
 
+/**
+ * The Tasks-plugin priority emoji, read by rank: the same ladder as Operon's
+ * letters, which is how Operon itself converts them when it takes a line over.
+ * A plain `#task` line carries its priority this way and nowhere else.
+ */
+const PRIORITY_EMOJI: ReadonlyArray<readonly [string, string]> = [
+  ["🔺", "S"],
+  ["⏫", "A"],
+  ["🔼", "B"],
+  ["🔽", "C"],
+  ["⏬", "D"],
+];
+
+/**
+ * The priority of the line, in whichever notation wrote it.
+ *
+ * Operon's `{{priority:: …}}` wins when it is there, because that is the value
+ * Operon itself reads and rewrites. Failing that, the emoji of a plain task is
+ * translated into the same letter, so one board can order both kinds together
+ * and neither has to learn the other's syntax. Nothing is written back: the
+ * translation only exists while the board is drawn.
+ */
+export function priorityOf(raw: string): string | null {
+  const field = readField(raw, "priority");
+  if (field !== null && field !== "") return field;
+  for (const [emoji, letter] of PRIORITY_EMOJI) {
+    if (raw.includes(emoji)) return letter;
+  }
+  return null;
+}
+
 /** Operon's priority, as a sort key: S first, then A, B, C, anything else last. */
 export function priorityRank(priority: string | null): number {
   if (priority === null) return 8;
@@ -345,17 +376,36 @@ export function addDays(date: string, days: number): string {
  * What the board is narrowing down to. Every flag set is one more condition the
  * task has to meet, and none set is the whole board: the filters are for
  * looking at the urgent or the late work, not for changing what is there.
+ *
+ * `overdue` and `soon` are one axis, so they are never on together: one asks
+ * for a day before today and the other for a day from today on, and a filter
+ * that can only match nothing is not a filter.
  */
 export interface MatrixFilter {
-  /** Planned for a day before today. */
+  /** Planned for a day before today; off whenever `soon` is on. */
   overdue: boolean;
-  /** Planned for today or within the next week. */
+  /** Planned for today or within the next week; off whenever `overdue` is on. */
   soon: boolean;
-  /** Operon priority S or A. */
+  /** The two top priorities: S or A, whether Operon's field or a plain line's emoji wrote it. */
   priority: boolean;
 }
 
 export const NO_FILTER: MatrixFilter = { overdue: false, soon: false, priority: false };
+
+/**
+ * The filter after a click on one of its chips.
+ *
+ * Turning on *Overdue* turns off *Next 7 days* and the other way round, because
+ * a day cannot be both before today and from today on. Priority is a different
+ * axis, so it adds to whichever of the two is on.
+ */
+export function toggleCondition(filter: MatrixFilter, key: keyof MatrixFilter): MatrixFilter {
+  const on = !filter[key];
+  const next: MatrixFilter = { ...filter, [key]: on };
+  if (on && key === "overdue") next.soon = false;
+  if (on && key === "soon") next.overdue = false;
+  return next;
+}
 
 /**
  * How far back the Done strip looks: a week, a month, or everything the board

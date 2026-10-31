@@ -21,15 +21,15 @@ Quadrant is not in Obsidian's community plugin list. Obsidian **1.5.0 or newer**
 ## What it does
 
 - **Four quadrants, an inbox and a dropped lane.** Pending tasks with no quadrant wait in *Unclassified*; tasks you have given up on sit in *Dropped*, out of the way but still visible.
-- **Both kinds of task.** Operon tasks (recognised by their `{{operonId:: ...}}`) and plain `#task` lines, side by side, each card showing its note, its day and its Operon priority.
+- **Both kinds of task.** Operon tasks (recognised by their `{{operonId:: ...}}`) and plain `#task` lines, side by side, each card showing its note, its day and its priority.
 - **One field per drop.** A quadrant writes `[eisenhower:: 1]` … `[eisenhower:: 4]` on the line, replaced in place if it is already there. Dropping writes Operon's own `{{status:: Project.Dropped}}` for an Operon task, and `[eisenhower:: 5]` for a plain one.
-- **Nothing else is touched.** Operon's `{{priority::}}` stays exactly as you set it; it only decides the order inside a lane (S, A, B, C, then the rest).
+- **Priority, in either notation.** Operon's `{{priority::}}` and the Tasks emoji (`🔺 ⏫ 🔼 🔽 ⏬`, read as S, A, B, C and D) both count, and neither is ever rewritten. Priority orders the cards inside a lane (S, A, B, C, then the rest) and gives the top two a coloured edge: a thick red one for `S`, a thinner orange one for `A`.
 - **Safe writes.** The line is checked against the one the board was drawn from before anything is written. If the note changed underneath, the write is skipped and the board is redrawn — no stale edit lands on the wrong line.
 - **A Done strip, as a record.** What you have finished lately, newest first, with the day on each card and seven marks for the last week. Drop a card on it and that task is finished today. The filters above do not apply to it.
 
 The four cells carry their meaning under the name — *urgent · important* and so on — rather than drawn Urgent / Important axes, and the third one is **Quick pass**, not *Delegate*: these are your tasks, and handing one to someone else is a note you add, not a drawer the board decides for you.
 
-**Filters** narrow what is on the board without changing anything: *Overdue*, *Next 7 days*, *Priority S/A* (Operon's two top priorities), and they add up. They live in the plugin, so they survive closing the board and every surface shows the same narrowing. The header says how much of the board you are seeing (`7 of 23 live`) and when it was last read, so **Refresh** is never a button you cannot tell from a broken one.
+**Filters** narrow what is on the board without changing anything: *Overdue*, *Next 7 days* and *Priority S/A* — the two top priorities, whether written as `{{priority:: S}}` or as `🔺` / `⏫`. *Overdue* and *Next 7 days* are one axis, so turning one on turns the other off, and priority is another axis that adds to whichever is on. They live in the plugin, so they survive closing the board and every surface shows the same narrowing. The header says how much of the board you are seeing (`7 of 23 live`) and when it was last read, so **Refresh** is never a button you cannot tell from a broken one.
 
 | Lane | Drop writes |
 | --- | --- |

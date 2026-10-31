@@ -32,6 +32,7 @@ import {
   scanNote,
   taskKey,
   todayOf,
+  toggleCondition,
   type DoneWindow,
   type MatrixFilter,
   type MatrixTask,
@@ -246,7 +247,7 @@ export default class QuadrantPlugin extends Plugin implements MatrixHost {
   }
 
   toggleFilter(key: keyof MatrixFilter): void {
-    this.filters = { ...this.filters, [key]: !this.filters[key] };
+    this.filters = toggleCondition(this.filters, key);
     this.redraw();
   }
 

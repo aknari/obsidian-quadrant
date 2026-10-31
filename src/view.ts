@@ -245,7 +245,7 @@ export class Board {
     meta.createSpan({ cls: "q-note", text: note });
     const when = task.completed === null ? "no date" : task.completed.slice(5);
     meta.createSpan({ cls: "q-done-date", text: when });
-    if (task.operonId !== null && task.priority !== null && task.priority !== "") {
+    if (task.priority !== null && task.priority !== "") {
       meta.createSpan({ cls: "q-priority", text: task.priority });
     }
     for (const tag of task.tags.slice(0, 3)) meta.createSpan({ cls: "q-tag", text: tag });
@@ -353,7 +353,7 @@ export class Board {
     if (task.scheduled !== null) meta.createSpan({ cls: "q-date", text: task.scheduled.slice(5) });
     if (task.priority !== null && task.priority !== "") {
       const priority = meta.createSpan({ cls: "q-priority", text: task.priority });
-      priority.setAttr("title", `Operon priority ${task.priority}`);
+      priority.setAttr("title", `Priority ${task.priority}`);
     }
     if (task.indent > 0) meta.createSpan({ cls: "q-subtask", text: "subtask" });
     for (const tag of task.tags.slice(0, 4)) meta.createSpan({ cls: "q-tag", text: tag });

@@ -200,10 +200,13 @@
   opacity: 0.45;
 }
 
-/* Operon's top priorities, marked on the card itself: the point of the
-   priority filter is to spot them at a glance. */
+/* The top two priorities, marked on the card itself: the point of the priority
+   filter is to spot them at a glance. Priority is the one thing a card cannot
+   show by where it sits — the cell already says urgent and important, and the
+   date already says when — so this is the only colour the board spends on it,
+   and S is drawn a step above A instead of level with it. */
 .q-task[data-priority="S"] {
-  border-left: 3px solid var(--color-red);
+  border-left: 5px solid var(--color-red);
 }
 
 .q-task[data-priority="A"] {

@@ -80,6 +80,15 @@ check(
 check("and its text is the text before the fields", task(OPERON).title, "Descargar las transparencias");
 check("the Operon date is read as the day it is planned for", task(OPERON).scheduled, "2026-09-20");
 check("a plan prefix is scheduling, not text", task("- [ ] 09:00 - 09:30 Llamar al banco #task").title, "Llamar al banco");
+check(
+  "a link keeps its words and drops its target",
+  task("- [ ] Leer el libro [Administración de Proyectos](file:///Users/aknari/misc/doc/ulpgc/docencia/c-202627/51248-gdpp/support/books/Administracion_de_Proyectos_4ed_Clifford.pdf) #task").title,
+  "Leer el libro Administración de Proyectos",
+);
+check("a target full of parentheses is still a target", task("- [ ] Ver [el PDF](file:///x/Proyectos_(4ed).pdf) #task").title, "Ver el PDF");
+check("and so is one in angle brackets", task("- [ ] Mira [esto](<file:///x/con espacio.pdf>) #task").title, "Mira esto");
+check("a link with no words leaves nothing behind", task("- [ ] Ver [](file:///x/a.pdf) y listo #task").title, "Ver y listo");
+check("an embed is not text either", task("- [ ] Revisar ![esquema](file:///x/esquema.png) del tema #task").title, "Revisar del tema");
 check("an indented subtask keeps its indent", task("  - [ ] Repasar el tema 3 #task").indent, 2);
 check("a tombstone is not a task", parseTaskLine("- [>] Ya se llevó #task", "note.md", 0), null);
 check("neither is a line that is not a task", parseTaskLine("En /home/bautista hay algo", "note.md", 0), null);

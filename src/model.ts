@@ -125,9 +125,24 @@ function inlineFields(raw: string): Array<{ key: string; value: string }> {
   return fields;
 }
 
+/**
+ * A markdown link, and an embed. A card is a title, so a link shows the words
+ * it was given and not where it points: printing
+ * `file:///Users/…/Administracion_de_Proyectos_4ed_Clifford.pdf` in the middle
+ * of a card makes the card unreadable, and the line underneath still holds the
+ * link for whoever opens the note. An embed has no words worth keeping, so it
+ * goes.
+ */
+// The target is either `<…>` or anything without a closing paren, with one
+// level of nested parens allowed for the likes of `Proyectos_(4ed).pdf`.
+const LINK = /\[([^\]]*)\]\((?:<[^>]*>|[^()]*(?:\([^()]*\)[^()]*)*)\)/gu;
+const EMBED = /!\[[^\]]*\]\((?:<[^>]*>|[^()]*(?:\([^()]*\)[^()]*)*)\)/gu;
+
 /** The text of a task line: no fields, no dates, no tags, no plan prefix. */
 export function titleOf(rest: string): string {
   let text = rest;
+  text = text.replace(EMBED, " ");
+  text = text.replace(LINK, "$1");
   text = text.replace(OPERON_FIELD, " ");
   text = text.replace(INLINE_FIELD, " ");
   text = text.replace(/\s*\{\{[^{}]*\}\}/gu, " ");

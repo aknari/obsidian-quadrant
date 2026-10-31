@@ -310,6 +310,31 @@ async function main(): Promise<void> {
   await flush();
   assert.equal(notes[notePath], settled, "a stale payload is ignored instead of writing");
 
+  // --- the ribbon lands where the setting says ---------------------------
+  // The sidebar is the default, so the two other placements are the ones the
+  // setting has to change: the same icon, a different container, and no board
+  // built twice when one is already there.
+  plugin.settings.openIn = "tab";
+  const tabBoardsBefore = boards().length;
+  const revealsBeforePlacement = revealed.length;
+  await plugin.openFromRibbon();
+  await flush();
+  assert.equal(boards().length, tabBoardsBefore, "a tab in the main area is reused, not duplicated");
+  assert.equal(revealed.length, revealsBeforePlacement + 1, "and it is brought to the front");
+
+  plugin.settings.openIn = "dialog";
+  const modalsBeforePlacement = (globalThis as any).__modals.length;
+  await plugin.openFromRibbon();
+  await flush();
+  assert.equal((globalThis as any).__modals.length, modalsBeforePlacement + 1, "a dialog opens a board of its own");
+
+  // An unknown value in a hand-edited data.json is not allowed to leave the
+  // ribbon doing nothing: it falls back to the sidebar.
+  const odd: any = new QuadrantPlugin({ vault, workspace } as any);
+  odd.loadData = async () => ({ openIn: "nowhere" });
+  await odd.onload();
+  assert.equal(odd.settings.openIn, "sidebar", "a placement that is not one of the three is ignored");
+
   console.log("plugin: all checks passed", {
     tasks: plugin.tasks.length,
     opened: opened.length,

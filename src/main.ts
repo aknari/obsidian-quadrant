@@ -50,6 +50,16 @@ import {
 /** What a write did: nothing changed, it landed, or the line moved underneath. */
 type WriteResult = "written" | "unchanged" | "stale";
 
+/** Where the ribbon icon puts the board. */
+type BoardPlacement = "sidebar" | "tab" | "dialog";
+
+/** The three placements, with the name each one goes by in the settings. */
+const PLACEMENTS: ReadonlyArray<readonly [BoardPlacement, string]> = [
+  ["sidebar", "Right sidebar"],
+  ["tab", "Tab in the main area"],
+  ["dialog", "Dialog over the note"],
+];
+
 interface QuadrantSettings {
   /** The tag a plain task line must carry to be shown (empty = any pending line). */
   taskTag: string;
@@ -59,6 +69,8 @@ interface QuadrantSettings {
   excludedFolders: string;
   /** How far back the Done strip looks: 7, 30, or 0 for everything. */
   doneWindow: DoneWindow;
+  /** Where the ribbon icon opens the board. */
+  openIn: BoardPlacement;
 }
 
 const DEFAULT_SETTINGS: QuadrantSettings = {
@@ -66,6 +78,7 @@ const DEFAULT_SETTINGS: QuadrantSettings = {
   plainTaskFolders: "10-journal/daily notes",
   excludedFolders: "10-journal/archive\n80-support/templates",
   doneWindow: 7,
+  openIn: "sidebar",
 };
 
 const REFRESH_DELAY = 1200;
@@ -100,13 +113,16 @@ export default class QuadrantPlugin extends Plugin implements MatrixHost {
     // A `data.json` edited by hand can say anything; a window that is not one
     // of the three would leave the lane unfiltered without saying so.
     if (!DONE_WINDOWS.includes(this.settings.doneWindow)) this.settings.doneWindow = DEFAULT_SETTINGS.doneWindow;
+    if (!PLACEMENTS.some(([value]) => value === this.settings.openIn)) this.settings.openIn = DEFAULT_SETTINGS.openIn;
     this.registerView(VIEW_TYPE, (leaf) => new MatrixView(leaf, this));
     this.registerBlock();
 
-    // The sidebar is what the ribbon opens: it sits beside the note instead of
-    // over it, Obsidian remembers its width and its place, and clicking a task
-    // then opens that task's note where you can see both.
-    this.addRibbonIcon("layout-grid", "Quadrant", () => { void this.openSidebar(); });
+    // The ribbon opens the board wherever the settings say. The sidebar is the
+    // default — it sits beside the note instead of over it, Obsidian remembers
+    // its width and its place, and clicking a task then opens that note where
+    // you can see both — but when the board is the thing you are looking at, a
+    // tab in the main area is the honest place for it.
+    this.addRibbonIcon("layout-grid", "Quadrant", () => { void this.openFromRibbon(); });
     this.addCommand({ id: "open-sidebar", name: "Open the matrix in the right sidebar", callback: () => { void this.openSidebar(); } });
     this.addCommand({ id: "open-tab", name: "Open the matrix in a tab", callback: () => { void this.openTab(); } });
     this.addCommand({ id: "open-dialog", name: "Open the matrix in a dialog", callback: () => { this.openDialog(); } });
@@ -140,6 +156,20 @@ export default class QuadrantPlugin extends Plugin implements MatrixHost {
         board.render();
       },
     );
+  }
+
+  /**
+   * The ribbon's one question, answered by the settings: which of the three
+   * placements. A dialog is the only one that cannot be revealed, so it is the
+   * only one that opens a new board every time.
+   */
+  async openFromRibbon(): Promise<void> {
+    if (this.settings.openIn === "tab") return this.openTab();
+    if (this.settings.openIn === "dialog") {
+      this.openDialog();
+      return;
+    }
+    await this.openSidebar();
   }
 
   /**
@@ -420,9 +450,21 @@ class QuadrantSettingsTab extends PluginSettingTab {
       text: "Dropping a task in a quadrant writes [eisenhower:: 1] … [eisenhower:: 4] on its line. Dropping it in Dropped writes Operon's {{status:: Project.Dropped}} when the task is Operon's, and '- [-]' plus [eisenhower:: 5] when it is a plain task. Bringing a dropped task back sets Operon's status to Project.Planned, or the checkbox back to '- [ ]'. Operon's {{priority::}} is never touched, and the quadrant stays on a line finished through the Done lane.",
     });
 
+    new Setting(containerEl)
+      .setName("The ribbon opens the board in")
+      .setDesc("Where the ribbon icon puts the board. The commands for the sidebar, a tab and a dialog are always there, whatever this says, so this only decides which one the icon opens.")
+      .addDropdown((menu) => {
+        for (const [value, label] of PLACEMENTS) menu.addOption(value, label);
+        menu.setValue(this.plugin.settings.openIn);
+        menu.onChange(async (value) => {
+          this.plugin.settings.openIn = value as BoardPlacement;
+          await this.plugin.saveSettings();
+        });
+      });
+
     containerEl.createEl("p", {
       cls: "setting-item-description",
-      text: "The board opens in the right sidebar from the ribbon, and there are commands for a tab and for a dialog. To keep it in a note, write a fenced block that starts with \"quadrant\" — the note holds the block, never a copy of the tasks.",
+      text: "The ribbon opens the board where the setting above says, and the commands for the sidebar, a tab and a dialog are there whatever it says. To keep it in a note, write a fenced block that starts with \"quadrant\" — the note holds the block, never a copy of the tasks.",
     });
   }
 }

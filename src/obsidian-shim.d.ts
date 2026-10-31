@@ -125,6 +125,7 @@ declare module "obsidian" {
     addText(callback: (component: TextComponent) => unknown): this;
     addTextArea(callback: (component: TextAreaComponent) => unknown): this;
     addToggle(callback: (component: ToggleComponent) => unknown): this;
+    addDropdown(callback: (component: DropdownComponent) => unknown): this;
   }
 
   export class TextComponent {
@@ -142,6 +143,12 @@ declare module "obsidian" {
   export class ToggleComponent {
     setValue(value: boolean): this;
     onChange(callback: (value: boolean) => void | Promise<void>): this;
+  }
+
+  export class DropdownComponent {
+    addOption(value: string, display: string): this;
+    setValue(value: string): this;
+    onChange(callback: (value: string) => void | Promise<void>): this;
   }
 
   export class ButtonComponent {

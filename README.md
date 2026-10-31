@@ -43,7 +43,7 @@ The four cells carry their meaning under the name — *urgent · important* and 
 
 ## Where the board lives
 
-The board is a projection, so the same one can be shown in four places. Only the container differs.
+The board is a projection, so the same one can be shown in four places. Only the container differs. The ribbon icon opens whichever one the settings name — the right sidebar by default — and the commands open any of them at any time.
 
 **The right sidebar** — what the ribbon icon (*layout-grid*) opens. It sits *beside* the note instead of over it, Obsidian remembers its width and its place across restarts, and you can drag it wherever you like or collapse it. In a narrow panel the four cells stack in one column and the board scrolls; in a wide one it goes back to 2×2. This is the placement to live in. If the board is already open, that one is revealed instead of a second one being built.
 
@@ -90,6 +90,7 @@ A card is a pointer to exactly one line, so a click opens that note **at that li
 | Folders for plain tasks | `10-journal/daily notes` | One folder per line. Plain tasks are read only from here (plus anywhere, once they have a quadrant). This is what keeps task-syntax examples, checklists inside notes and old lists off the board. Empty = no limit. |
 | Excluded folders | `10-journal/archive`, `80-support/templates` | One folder per line. Nothing inside them is read at all: archives hold finished work, templates hold placeholders. |
 | Done window | `7` | How far back the Done strip looks: `7`, `30`, or `0` for everything. Set from the chips in the strip, not here; it is saved with the rest. |
+| The ribbon opens the board in | `sidebar` | Where the ribbon icon puts the board: the right sidebar, a tab in the main area, or a dialog. The commands for all three stay available either way. |
 
 ## The field is still `eisenhower`
 

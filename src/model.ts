@@ -781,3 +781,134 @@ export function laneOf(task: MatrixTask): number {
   if (task.quadrant === DROPPED) return DROPPED;
   return task.quadrant ?? 0;
 }
+
+/**
+ * Archiving: the one operation that takes a line out of its note.
+ *
+ * The board does not need it — a finished task leaves its quadrant when it is
+ * ticked and shows up in Done with its date. Notes do, in time: a daily note
+ * that keeps every task it ever held stops being a diary and becomes a list.
+ *
+ * The rule is a move, never a delete. The line travels to the month's archive
+ * exactly as it was, stamp and all, under the note it came from, and the note
+ * keeps `- [>]`: the tombstone the daily-note consolidation already leaves, and
+ * which this reader has always refused to see as work. Written in that order, a
+ * job that stops halfway duplicates a line instead of losing one, and a
+ * duplicate can be seen.
+ */
+
+/** The day a line says it was created (`➕ 2026-09-16`), when it says so. */
+export function createdOf(raw: string): string | null {
+  const stamp = /➕\s*(\d{4}-\d{2}-\d{2})/u.exec(raw);
+  return stamp === null ? null : stamp[1];
+}
+
+/** The month a day belongs to, as `YYYY-MM`: the archive is one file per month. */
+export function monthOf(day: string): string {
+  return day.slice(0, 7);
+}
+
+/** The day a line has to be older than to be archived. */
+export function archiveCutoff(today: string, days: number): string {
+  return addDays(today, -Math.max(1, Math.round(days)));
+}
+
+/**
+ * The line as the record of what left it: the box becomes `- [>]` and nothing
+ * else changes. The text, the tag, the `✅` and the `➕` all stay, because they
+ * are what the note held; the box alone is what the reader skips on.
+ */
+export function tombstone(raw: string): string {
+  return raw.replace(/^(\s*)- \[[^\]\n]\]/u, "$1- [>]");
+}
+
+export interface NoteText {
+  path: string;
+  content: string;
+}
+
+export interface ArchiveCandidate {
+  path: string;
+  line: number;
+  raw: string;
+  title: string;
+}
+
+export interface ArchivePlan {
+  /** The lines that will move, in the order they were read. */
+  moving: ArchiveCandidate[];
+  /** The notes that change, each with its whole new content. */
+  rewrites: Array<{ path: string; content: string }>;
+  /** Finished lines younger than the cutoff: there is no hurry for them. */
+  recent: number;
+  /** Lines with no date of their own, which the cutoff cannot judge. */
+  undated: number;
+}
+
+export interface ArchiveOptions {
+  taskTag: string;
+  /** The folders a plain task has to be in to be the board's business. */
+  folders: string[];
+  today: string;
+  /** How many days a line has to be old before it may leave. */
+  days: number;
+}
+
+/**
+ * What the archive job would do, without doing it.
+ *
+ * Only plain lines take part: an Operon task's status is Operon's, and moving
+ * its line out of the project note would be editing a record this plugin does
+ * not own. A finished line is judged by the day it was finished, a dropped one
+ * by the `➕` it carries; a line with neither is left where it is rather than
+ * guessed at, because this is the one thing here that edits notes.
+ */
+export function planArchive(notes: NoteText[], options: ArchiveOptions): ArchivePlan {
+  const cutoff = archiveCutoff(options.today, options.days);
+  const plan: ArchivePlan = { moving: [], rewrites: [], recent: 0, undated: 0 };
+  for (const note of notes) {
+    const lines = note.content.split("\n");
+    const chosen: ArchiveCandidate[] = [];
+    for (const task of scanNote(note.content, note.path, { taskTag: options.taskTag, includeDone: true })) {
+      if (task.operonId !== null) continue;
+      if (!plainTaskVisible(task, options.folders)) continue;
+      const day = isDone(task) ? task.completed : createdOf(task.raw);
+      if (day === null) {
+        plan.undated += 1;
+        continue;
+      }
+      if (day >= cutoff) {
+        plan.recent += 1;
+        continue;
+      }
+      chosen.push({ path: task.path, line: task.line, raw: task.raw, title: task.title });
+    }
+    if (chosen.length === 0) continue;
+    for (const item of chosen) lines[item.line] = tombstone(item.raw);
+    plan.moving.push(...chosen);
+    plan.rewrites.push({ path: note.path, content: lines.join("\n") });
+  }
+  return plan;
+}
+
+/**
+ * The block an archive file gains: one section per source note, its lines kept
+ * verbatim underneath. Verbatim matters — Tasks and Dataview still read them,
+ * and an archive is a record, not a summary.
+ */
+export function archiveBlock(moving: ArchiveCandidate[]): string {
+  const byNote = new Map<string, ArchiveCandidate[]>();
+  for (const item of moving) {
+    const list = byNote.get(item.path) ?? [];
+    list.push(item);
+    byNote.set(item.path, list);
+  }
+  const lines: string[] = [];
+  for (const [path, items] of byNote) {
+    const name = path.split("/").pop()?.replace(/\.md$/u, "") ?? path;
+    lines.push(`## De [[${name}]]`, "");
+    for (const item of items) lines.push(item.raw);
+    lines.push("");
+  }
+  return lines.join("\n");
+}

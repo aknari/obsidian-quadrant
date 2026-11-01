@@ -21,7 +21,12 @@ import {
   addDays,
   applyFinish,
   applyMove,
+  archiveBlock,
+  archiveCutoff,
   clearQuadrant,
+  createdOf,
+  monthOf,
+  planArchive,
   completedOf,
   doneByDay,
   doneWithin,
@@ -382,6 +387,48 @@ const byEmoji = sortTasks([task("- [ ] Sin #task"), task("- [ ] Emoji #task 🔼
 check("a plain task with an emoji sorts by its rank, not with the ones that have none", byEmoji.map((line) => line.title), ["Emoji", "Sin"]);
 
 check("an out-of-range quadrant is not a quadrant", quadrantOf("- [ ] X [eisenhower:: 9]"), null);
+
+console.log("\nArchiving");
+
+// The archive section comes before the filter fixtures declare TODAY, so it
+// carries its own day instead of reaching forward for one.
+const ARCHIVE_TODAY = "2026-10-26";
+const OLD = addDays(ARCHIVE_TODAY, -40);
+const ARCHIVE_NOTE = [
+  `- [x] Vieja #task ✅ ${OLD}`,
+  `- [x] Reciente #task ✅ ${ARCHIVE_TODAY}`,
+  `- [-] Descartada #task [eisenhower:: 5] ➕ ${OLD}`,
+  "- [-] Sin fecha #task [eisenhower:: 5]",
+  `- [x] De Operon {{operonId:: zz1}} {{status:: Project.Finished}} {{dateCompleted:: ${OLD}}}`,
+].join("\n");
+const ARCHIVE_OPTIONS = { taskTag: "#task", folders: ["10-journal/daily notes"], today: ARCHIVE_TODAY, days: 30 };
+const plan = planArchive([{ path: "10-journal/daily notes/2026-01-01.md", content: ARCHIVE_NOTE }], ARCHIVE_OPTIONS);
+check("only what is old enough moves", plan.moving.map((item) => item.title), ["Vieja", "Descartada"]);
+check("a recent one is counted, not moved", plan.recent, 1);
+check("and one with no date is left alone", plan.undated, 1);
+check(
+  "the source keeps a tombstone, and everything else intact",
+  plan.rewrites[0].content.split("\n"),
+  [
+    `- [>] Vieja #task ✅ ${OLD}`,
+    `- [x] Reciente #task ✅ ${ARCHIVE_TODAY}`,
+    `- [>] Descartada #task [eisenhower:: 5] ➕ ${OLD}`,
+    "- [-] Sin fecha #task [eisenhower:: 5]",
+    `- [x] De Operon {{operonId:: zz1}} {{status:: Project.Finished}} {{dateCompleted:: ${OLD}}}`,
+  ],
+);
+check("an Operon task is never taken: its status is Operon's", plan.moving.some((item) => item.title === "De Operon"), false);
+check("the archive names the note the lines came from", archiveBlock(plan.moving).split("\n")[0], "## De [[2026-01-01]]");
+check("and keeps every line as it was", archiveBlock(plan.moving).includes(`- [x] Vieja #task ✅ ${OLD}`), true);
+check("a day knows its month", monthOf(ARCHIVE_TODAY), ARCHIVE_TODAY.slice(0, 7));
+check("the cutoff is the day the window opens", archiveCutoff(ARCHIVE_TODAY, 30), addDays(ARCHIVE_TODAY, -30));
+check("the ➕ of a line is its date when it has no ✅", createdOf(`- [-] X #task ➕ ${OLD}`), OLD);
+check("a line outside the folders the board reads is not the archive's business", planArchive([{ path: "80-support/x.md", content: `- [x] Vieja #task ✅ ${OLD}` }], ARCHIVE_OPTIONS).moving.length, 0);
+check(
+  "nothing old enough is nothing to rewrite",
+  planArchive([{ path: "10-journal/daily notes/2026-01-02.md", content: `- [x] Nueva #task ✅ ${ARCHIVE_TODAY}` }], ARCHIVE_OPTIONS).rewrites.length,
+  0,
+);
 
 console.log("\nNarrowing the board");
 

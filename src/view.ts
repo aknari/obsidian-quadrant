@@ -24,6 +24,8 @@ import {
   titleParts,
   todayOf,
   windowLabel,
+  type ArchiveCandidate,
+  type ArchivePlan,
   type DoneWindow,
   type MatrixFilter,
   type MatrixTask,
@@ -476,4 +478,66 @@ export class BoardModal extends Modal implements MatrixSurface {
   }
 
   render(): void { this.board?.render(); }
+}
+
+/**
+ * The archive job, shown before it happens.
+ *
+ * A move that rewrites several notes is not something to do behind the user's
+ * back, so the dialog says how many lines, which notes they come from, where
+ * they will land — and what it is leaving alone, because a task with no date of
+ * its own cannot be judged old, and silence about that would look like a miss.
+ */
+export class ArchiveModal extends Modal {
+  constructor(
+    app: App,
+    private plan: ArchivePlan,
+    private destination: string,
+    private run: () => void,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    this.contentEl.empty();
+    this.contentEl.addClass("q-archive-modal");
+    const count = this.plan.moving.length;
+    this.contentEl.createEl("h3", { text: count === 1 ? "Archive 1 task?" : `Archive ${count} tasks?` });
+    this.contentEl.createEl("p", {
+      cls: "setting-item-description",
+      text: `They go to ${this.destination}, and each one leaves "- [>]" behind in its note. Nothing is deleted.`,
+    });
+
+    const byNote = new Map<string, ArchiveCandidate[]>();
+    for (const item of this.plan.moving) {
+      const list = byNote.get(item.path) ?? [];
+      list.push(item);
+      byNote.set(item.path, list);
+    }
+    for (const [path, items] of byNote) {
+      const group = this.contentEl.createDiv({ cls: "q-archive-note" });
+      group.createEl("strong", { text: path });
+      const list = group.createEl("ul");
+      for (const item of items.slice(0, 6)) {
+        list.createEl("li", { text: item.title === "" ? "(untitled)" : item.title });
+      }
+      if (items.length > 6) list.createEl("li", { text: `and ${items.length - 6} more` });
+    }
+
+    const left: string[] = [];
+    if (this.plan.recent > 0) left.push(`${this.plan.recent} too recent`);
+    if (this.plan.undated > 0) left.push(`${this.plan.undated} with no date to judge by`);
+    if (left.length > 0) {
+      this.contentEl.createEl("p", { cls: "setting-item-description", text: `Left where they are: ${left.join(", ")}.` });
+    }
+
+    const buttons = this.contentEl.createDiv({ cls: "q-archive-buttons" });
+    const cancel = buttons.createEl("button", { text: "Cancel", cls: "q-archive-cancel" });
+    cancel.addEventListener("click", () => this.close());
+    const go = buttons.createEl("button", { text: "Archive", cls: "q-archive-go mod-cta" });
+    go.addEventListener("click", () => {
+      this.close();
+      this.run();
+    });
+  }
 }

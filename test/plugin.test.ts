@@ -15,7 +15,7 @@
 
 import assert from "node:assert/strict";
 import QuadrantPlugin from "../src/main";
-import { todayOf } from "../src/model";
+import { addDays, todayOf } from "../src/model";
 import { FakeEl, TFile } from "./obsidian-stub";
 
 // The finished line is stamped with the day the test runs: the Done strip looks
@@ -100,6 +100,8 @@ const vault = {
     return next;
   },
   async modify() {},
+  async create(path: string, data: string) { notes[path] = data; return fileOf(path); },
+  async createFolder() {},
   on() { return {}; },
 };
 
@@ -115,7 +117,7 @@ async function main(): Promise<void> {
   assert.equal(plugin.__views.has("quadrant-view"), true, "the view is registered");
   assert.deepEqual(
     plugin.__commands.map((c: any) => c.id),
-    ["open-sidebar", "open-tab", "open-dialog", "refresh"],
+    ["open-sidebar", "open-tab", "open-dialog", "refresh", "archive"],
     "the commands, in order",
   );
   assert.equal(plugin.__ribbon.length, 1, "one ribbon icon");
@@ -334,6 +336,38 @@ async function main(): Promise<void> {
   odd.loadData = async () => ({ openIn: "nowhere" });
   await odd.onload();
   assert.equal(odd.settings.openIn, "sidebar", "a placement that is not one of the three is ignored");
+
+  // --- the archive command: a move, not a delete --------------------------
+  // A line old enough travels to the month's file and its note keeps the
+  // tombstone; a recent one, or one with no date to judge it by, stays put.
+  const OLD = addDays(TODAY, -40);
+  const archiveSource = "10-journal/daily notes/2026-01-05.md";
+  notes[archiveSource] = [
+    `- [x] Tarea vieja #task ✅ ${OLD}`,
+    `- [x] Tarea de ayer #task ✅ ${TODAY}`,
+    `- [-] Descartada hace tiempo #task [eisenhower:: 5] ➕ ${OLD}`,
+    "- [-] Sin fecha #task [eisenhower:: 5]",
+  ].join("\n");
+  await plugin.refresh();
+
+  plugin.__commands.find((c: any) => c.id === "archive").callback();
+  await flush();
+  const archiveModal = (globalThis as any).__modals.at(-1);
+  assert.equal(archiveModal.contentEl.hasClass("q-archive-modal"), true, "the archive asks before it writes");
+  archiveModal.contentEl.all("q-archive-go")[0].click();
+  for (let i = 0; i < 5; i += 1) await flush();
+
+  const source = notes[archiveSource].split("\n");
+  assert.equal(source[0], `- [>] Tarea vieja #task ✅ ${OLD}`, "the archived line leaves a tombstone behind");
+  assert.equal(source[1], `- [x] Tarea de ayer #task ✅ ${TODAY}`, "a recent one is not touched");
+  assert.equal(source[2], `- [>] Descartada hace tiempo #task [eisenhower:: 5] ➕ ${OLD}`, "a dropped one moves by its own date");
+  assert.equal(source[3], "- [-] Sin fecha #task [eisenhower:: 5]", "and the one with no date stays");
+
+  const archiveFile = notes[`10-journal/archive/tareas/${TODAY.slice(0, 7)}.md`];
+  assert.ok(archiveFile, "the month's file exists");
+  assert.ok(archiveFile.includes(`- [x] Tarea vieja #task ✅ ${OLD}`), "and keeps the line as it was");
+  assert.ok(archiveFile.includes("## De [[2026-01-05]]"), "naming the note it came from");
+  assert.ok(!archiveFile.includes("Sin fecha"), "nothing undated was taken");
 
   console.log("plugin: all checks passed", {
     tasks: plugin.tasks.length,

@@ -37,6 +37,8 @@ declare module "obsidian" {
     cachedRead(file: TFile): Promise<string>;
     process(file: TFile, fn: (data: string) => string): Promise<string>;
     modify(file: TFile, data: string): Promise<void>;
+    create(path: string, data: string): Promise<TFile>;
+    createFolder(path: string): Promise<TAbstractFile>;
     on(event: "modify" | "create" | "delete", callback: (file: TAbstractFile) => unknown): unknown;
   }
 

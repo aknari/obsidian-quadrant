@@ -27,17 +27,25 @@ import {
   NO_FILTER,
   applyFinish,
   applyMove,
+  archiveBlock,
   isDone,
+  monthOf,
+  planArchive,
   plainTaskVisible,
   scanNote,
   taskKey,
   todayOf,
+  tombstone,
   toggleCondition,
+  type ArchiveCandidate,
+  type ArchivePlan,
   type DoneWindow,
   type MatrixFilter,
   type MatrixTask,
+  type NoteText,
 } from "./model";
 import {
+  ArchiveModal,
   BLOCK_LANGUAGE,
   Board,
   BoardModal,
@@ -69,6 +77,10 @@ interface QuadrantSettings {
   excludedFolders: string;
   /** How far back the Done strip looks: 7, 30, or 0 for everything. */
   doneWindow: DoneWindow;
+  /** Where archived lines go, one file per month. */
+  archiveFolder: string;
+  /** How many days a finished line has to be old before it may move. */
+  archiveDays: number;
   /** Where the ribbon icon opens the board. */
   openIn: BoardPlacement;
 }
@@ -79,6 +91,8 @@ const DEFAULT_SETTINGS: QuadrantSettings = {
   excludedFolders: "10-journal/archive\n80-support/templates",
   doneWindow: 7,
   openIn: "sidebar",
+  archiveFolder: "10-journal/archive/tareas",
+  archiveDays: 30,
 };
 
 const REFRESH_DELAY = 1200;
@@ -127,6 +141,7 @@ export default class QuadrantPlugin extends Plugin implements MatrixHost {
     this.addCommand({ id: "open-tab", name: "Open the matrix in a tab", callback: () => { void this.openTab(); } });
     this.addCommand({ id: "open-dialog", name: "Open the matrix in a dialog", callback: () => { this.openDialog(); } });
     this.addCommand({ id: "refresh", name: "Refresh the matrix", callback: () => { void this.refresh(); } });
+    this.addCommand({ id: "archive", name: "Archive finished and dropped tasks...", callback: () => { void this.archiveOldTasks(); } });
     this.addSettingTab(new QuadrantSettingsTab(this));
     this.registerEvent(this.app.vault.on("modify", () => { this.schedule(); }));
   }
@@ -391,6 +406,110 @@ export default class QuadrantPlugin extends Plugin implements MatrixHost {
     await leaf.openFile(file, { eState: { line: task.line } });
   }
 
+  /** The file the archive goes to: one per month, inside the configured folder. */
+  private archivePath(month: string): string {
+    const folder = this.settings.archiveFolder.trim().replace(/^\/+|\/+$/gu, "");
+    return folder === "" ? `${month}.md` : `${folder}/${month}.md`;
+  }
+
+  /** What the archive job would move, read with the same rules the board reads by. */
+  private async collectArchivePlan(): Promise<ArchivePlan> {
+    const excluded = this.folders(this.settings.excludedFolders);
+    const notes: NoteText[] = [];
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      if (excluded.some((folder) => file.path === folder || file.path.startsWith(`${folder}/`))) continue;
+      notes.push({ path: file.path, content: await this.app.vault.cachedRead(file) });
+    }
+    return planArchive(notes, {
+      taskTag: this.settings.taskTag,
+      folders: this.folders(this.settings.plainTaskFolders),
+      today: todayOf(),
+      days: this.settings.archiveDays,
+    });
+  }
+
+  /**
+   * The command: read, say what would move, and only then move it. A job that
+   * rewrites several notes is not something to do behind the user's back, and
+   * archiving is the only thing this plugin does that takes a line away.
+   */
+  async archiveOldTasks(): Promise<void> {
+    const plan = await this.collectArchivePlan();
+    if (plan.moving.length === 0) {
+      new Notice("Quadrant: nothing is old enough to archive.");
+      return;
+    }
+    const month = monthOf(todayOf());
+    new ArchiveModal(this.app, plan, this.archivePath(month), () => { void this.runArchive(plan); }).open();
+  }
+
+  /**
+   * The archive is written first, then the notes: if this stops halfway, the
+   * line exists twice — where it was and in the archive — which can be seen and
+   * undone, instead of once and gone.
+   */
+  private async runArchive(plan: ArchivePlan): Promise<void> {
+    const month = monthOf(todayOf());
+    const path = this.archivePath(month);
+    try {
+      await this.appendArchive(path, month, plan.moving);
+    } catch (error) {
+      console.error("[quadrant] could not write the archive", error);
+      new Notice(`Quadrant: the archive could not be written (${String(error)}); nothing was moved.`);
+      return;
+    }
+
+    let moved = 0;
+    let left = 0;
+    for (const rewrite of plan.rewrites) {
+      const chosen = plan.moving.filter((item) => item.path === rewrite.path);
+      const file = this.app.vault.getAbstractFileByPath(rewrite.path);
+      if (!(file instanceof TFile)) {
+        left += chosen.length;
+        continue;
+      }
+      try {
+        await this.app.vault.process(file, (content) => {
+          const lines = content.split("\n");
+          for (const item of chosen) {
+            // The note may have moved on since it was read: a tombstone goes on
+            // the line that still holds that task, and on no other.
+            if (lines[item.line] !== item.raw) {
+              left += 1;
+              continue;
+            }
+            lines[item.line] = tombstone(item.raw);
+            moved += 1;
+          }
+          return lines.join("\n");
+        });
+      } catch (error) {
+        console.error(`[quadrant] could not rewrite ${rewrite.path}`, error);
+        left += chosen.length;
+      }
+    }
+
+    const where = path.replace(/\.md$/u, "");
+    const also = left > 0 ? `, ${left} left alone (that note changed since the board was drawn)` : "";
+    new Notice(moved === 1 ? `Quadrant: 1 task archived to ${where}${also}.` : `Quadrant: ${moved} tasks archived to ${where}${also}.`);
+    await this.refresh();
+  }
+
+  /** Appends the month's block, creating the folder and the file the first time. */
+  private async appendArchive(path: string, month: string, moving: ArchiveCandidate[]): Promise<void> {
+    const folder = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+    if (folder !== "" && this.app.vault.getAbstractFileByPath(folder) === null) {
+      await this.app.vault.createFolder(folder);
+    }
+    const block = archiveBlock(moving);
+    const existing = this.app.vault.getAbstractFileByPath(path);
+    if (existing instanceof TFile) {
+      await this.app.vault.process(existing, (content) => `${content.trimEnd()}\n\n${block}\n`);
+      return;
+    }
+    await this.app.vault.create(path, `# Tareas archivadas — ${month}\n\n${block}\n`);
+  }
+
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
     await this.refresh();
@@ -448,6 +567,34 @@ class QuadrantSettingsTab extends PluginSettingTab {
     containerEl.createEl("p", {
       cls: "setting-item-description",
       text: "Dropping a task in a quadrant writes [eisenhower:: 1] … [eisenhower:: 4] on its line. Dropping it in Dropped writes Operon's {{status:: Project.Dropped}} when the task is Operon's, and '- [-]' plus [eisenhower:: 5] when it is a plain task. Bringing a dropped task back sets Operon's status to Project.Planned, or the checkbox back to '- [ ]'. Operon's {{priority::}} is never touched, and the quadrant stays on a line finished through the Done lane.",
+    });
+
+    new Setting(containerEl)
+      .setName("Archive folder")
+      .setDesc("Where archived tasks go, one file per month (2026-11.md and so on). Keep it inside one of the excluded folders above: the archive is a record, not work to place, and the board must not read it back.")
+      .addText((text) => text
+        .setPlaceholder("10-journal/archive/tareas")
+        .setValue(this.plugin.settings.archiveFolder)
+        .onChange(async (value) => {
+          this.plugin.settings.archiveFolder = value.trim();
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
+      .setName("Archive after")
+      .setDesc("Days a line has to be old before the archive command may move it. A finished task is judged by the day it was finished; a dropped one by its ➕ date, and one with neither is never moved — the command says how many it left behind and why.")
+      .addText((text) => text
+        .setPlaceholder("30")
+        .setValue(String(this.plugin.settings.archiveDays))
+        .onChange(async (value) => {
+          const days = Number(value.trim());
+          this.plugin.settings.archiveDays = Number.isInteger(days) && days > 0 ? Math.min(days, 3650) : DEFAULT_SETTINGS.archiveDays;
+          await this.plugin.saveSettings();
+        }));
+
+    containerEl.createEl("p", {
+      cls: "setting-item-description",
+      text: "Archiving moves a line: the task travels to the month's file exactly as it was, under the note it came from, and the note keeps a '- [>]' tombstone where the line stood — the mark the daily notes already use for work that moved on. Nothing is deleted, no Operon task takes part (its status is Operon's), and the command asks before it writes.",
     });
 
     new Setting(containerEl)

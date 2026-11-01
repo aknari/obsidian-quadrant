@@ -138,9 +138,22 @@ function inlineFields(raw: string): Array<{ key: string; value: string }> {
 const LINK = /\[([^\]]*)\]\((?:<[^>]*>|[^()]*(?:\([^()]*\)[^()]*)*)\)/gu;
 const EMBED = /!\[[^\]]*\]\((?:<[^>]*>|[^()]*(?:\([^()]*\)[^()]*)*)\)/gu;
 
+/**
+ * The other notation, and the one this vault writes most: `[[…]]`. A wikilink
+ * shows what it would show in the note — the alias if it has one, the note's
+ * name if not — and never its brackets. A heading is a place inside the note,
+ * not part of its name, so `[[Nota#Tema 3]]` shows `Nota`; leaving the `#` in
+ * would both read badly and be taken for a tag. An embedded note goes, like an
+ * embedded picture: a card is a title, not a gallery.
+ */
+const WIKI_EMBED = /!\[\[[^\]]*\]\]/gu;
+const WIKI_LINK = /\[\[([^\]|#^]+)(?:[#^][^\]|]*)?(?:\|([^\]]*))?\]\]/gu;
+
 /** The text of a task line: no fields, no dates, no tags, no plan prefix. */
 export function titleOf(rest: string): string {
   let text = rest;
+  text = text.replace(WIKI_EMBED, " ");
+  text = text.replace(WIKI_LINK, (_all, target: string, alias?: string) => (alias !== undefined && alias.trim() !== "" ? alias : target));
   text = text.replace(EMBED, " ");
   text = text.replace(LINK, "$1");
   text = text.replace(OPERON_FIELD, " ");
@@ -163,6 +176,7 @@ export interface TitlePart {
   italic?: boolean;
   strike?: boolean;
   highlight?: boolean;
+  code?: boolean;
 }
 
 interface Style {
@@ -170,9 +184,10 @@ interface Style {
   italic: boolean;
   strike: boolean;
   highlight: boolean;
+  code: boolean;
 }
 
-const PLAIN: Style = { bold: false, italic: false, strike: false, highlight: false };
+const PLAIN: Style = { bold: false, italic: false, strike: false, highlight: false, code: false };
 
 /**
  * Emphasis in a title, as a mark rather than as a word.
@@ -207,7 +222,7 @@ function stylesOf(mark: string): Style {
   if (mark === "~~") return { ...PLAIN, strike: true };
   if (mark === "==") return { ...PLAIN, highlight: true };
   const bold = mark.length >= 2;
-  return { bold, italic: !bold || mark.length === 3, strike: false, highlight: false };
+  return { bold, italic: !bold || mark.length === 3, strike: false, highlight: false, code: false };
 }
 
 const isSpace = (char: string | undefined): boolean => char === undefined || /\s/u.test(char);
@@ -237,6 +252,20 @@ function read(text: string, style: Style, out: TitlePart[]): void {
   let at = 0;
   let i = 0;
   while (i < text.length) {
+    // Code is read before any mark is: what is inside backticks is what it
+    // says, so `set_cap_cfg` and `_init_` keep their underscores.
+    if (text[i] === "`") {
+      const end = text.indexOf("`", i + 1);
+      if (end === -1) {
+        i += 1;
+        continue;
+      }
+      if (i > at) push(out, text.slice(at, i), style);
+      push(out, text.slice(i + 1, end), { ...style, code: true });
+      i = end + 1;
+      at = i;
+      continue;
+    }
     const mark = markAt(text, i);
     if (mark === null || !opens(text, i, mark)) {
       i += 1;
@@ -262,6 +291,7 @@ function merge(one: Style, other: Style): Style {
     italic: one.italic || other.italic,
     strike: one.strike || other.strike,
     highlight: one.highlight || other.highlight,
+    code: one.code || other.code,
   };
 }
 
@@ -273,7 +303,8 @@ function push(out: TitlePart[], text: string, style: Style): void {
     (last.bold === true) === style.bold &&
     (last.italic === true) === style.italic &&
     (last.strike === true) === style.strike &&
-    (last.highlight === true) === style.highlight;
+    (last.highlight === true) === style.highlight &&
+    (last.code === true) === style.code;
   if (same) {
     last.text += text;
     return;
@@ -283,6 +314,7 @@ function push(out: TitlePart[], text: string, style: Style): void {
   if (style.italic) part.italic = true;
   if (style.strike) part.strike = true;
   if (style.highlight) part.highlight = true;
+  if (style.code) part.code = true;
   out.push(part);
 }
 

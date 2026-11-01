@@ -345,6 +345,7 @@ export class Board {
       if (part.italic === true) tags.push("em");
       if (part.strike === true) tags.push("s");
       if (part.highlight === true) tags.push("mark");
+      if (part.code === true) tags.push("code");
       if (tags.length === 0) {
         el.createSpan({ text: part.text });
         continue;

@@ -91,6 +91,33 @@ check("and so is one in angle brackets", task("- [ ] Mira [esto](<file:///x/con 
 check("a link with no words leaves nothing behind", task("- [ ] Ver [](file:///x/a.pdf) y listo #task").title, "Ver y listo");
 check("an embed is not text either", task("- [ ] Revisar ![esquema](file:///x/esquema.png) del tema #task").title, "Revisar del tema");
 check(
+  "a wikilink keeps its words and drops its brackets",
+  task("- [ ] Ver [[Apuntes de Lisa]] antes #task").title,
+  "Ver Apuntes de Lisa antes",
+);
+check("an alias is what a wikilink says", task("- [ ] Mirar [[Nota|las notas]] #task").title, "Mirar las notas");
+check(
+  "a heading is a place in the note, not part of its name",
+  task("- [ ] Repasar [[Nota#Tema 3]] #task").title,
+  "Repasar Nota",
+);
+check("an embedded note is not text either", task("- [ ] Ver ![[esquema.png]] esto #task").title, "Ver esto");
+check(
+  "code is read as code, without its backticks",
+  titleParts("Revisar `mask` ahora"),
+  [{ text: "Revisar " }, { text: "mask", code: true }, { text: " ahora" }],
+);
+check(
+  "and what is inside code is never a mark",
+  titleParts("Llamar a `set_cap_cfg()` y `_init_`"),
+  [
+    { text: "Llamar a " },
+    { text: "set_cap_cfg()", code: true },
+    { text: " y " },
+    { text: "_init_", code: true },
+  ],
+);
+check(
   "bold is a mark the card draws, not a word in the text",
   task("- [ ] Repasar **el tema 3** y a otra cosa #task").title,
   "Repasar **el tema 3** y a otra cosa",

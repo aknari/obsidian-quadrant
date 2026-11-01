@@ -218,6 +218,16 @@
   line-height: 1.3;
 }
 
+/* A signal name or a function is often the whole task, so code keeps the
+   theme's monospace and tone but not its block padding: on a card the text is
+   12px and a full code block would push the title apart. */
+.q-task-title code {
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--code-background);
+  font-size: 0.95em;
+}
+
 .q-task-meta {
   display: flex;
   flex-wrap: wrap;

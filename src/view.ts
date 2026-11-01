@@ -340,10 +340,18 @@ export class Board {
   private titleEl(parent: HTMLElement, title: string): HTMLElement {
     const el = parent.createDiv({ cls: "q-task-title" });
     for (const part of titleParts(title === "" ? "(untitled)" : title)) {
-      if (part.bold && part.italic) el.createEl("strong").createEl("em", { text: part.text });
-      else if (part.bold) el.createEl("strong", { text: part.text });
-      else if (part.italic) el.createEl("em", { text: part.text });
-      else el.createSpan({ text: part.text });
+      const tags: string[] = [];
+      if (part.bold === true) tags.push("strong");
+      if (part.italic === true) tags.push("em");
+      if (part.strike === true) tags.push("s");
+      if (part.highlight === true) tags.push("mark");
+      if (tags.length === 0) {
+        el.createSpan({ text: part.text });
+        continue;
+      }
+      let node: HTMLElement = el;
+      for (const tag of tags.slice(0, -1)) node = node.createEl(tag);
+      node.createEl(tags[tags.length - 1], { text: part.text });
     }
     return el;
   }

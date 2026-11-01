@@ -99,17 +99,17 @@ check(
   "and it is read as styling",
   titleParts("Repasar **el tema 3**"),
   [
-    { text: "Repasar ", bold: false, italic: false },
-    { text: "el tema 3", bold: true, italic: false },
+    { text: "Repasar " },
+    { text: "el tema 3", bold: true },
   ],
 );
 check(
   "italics come in both notations, and bold in both too",
   ["*uno*", "_dos_", "__tres__"].map((one) => titleParts(one)),
   [
-    [{ text: "uno", bold: false, italic: true }],
-    [{ text: "dos", bold: false, italic: true }],
-    [{ text: "tres", bold: true, italic: false }],
+    [{ text: "uno", italic: true }],
+    [{ text: "dos", italic: true }],
+    [{ text: "tres", bold: true }],
   ],
 );
 check(
@@ -120,15 +120,41 @@ check(
 check(
   "an underscore inside a word is not emphasis",
   titleParts("Llamar a set_cap_cfg() y a p_stream"),
-  [{ text: "Llamar a set_cap_cfg() y a p_stream", bold: false, italic: false }],
+  [{ text: "Llamar a set_cap_cfg() y a p_stream" }],
 );
-check("a lone asterisk stays where it is", titleParts("El comodín gram*"), [{ text: "El comodín gram*", bold: false, italic: false }]);
-check("marks that do not close are words after all", titleParts("2 ** 3 y 4"), [{ text: "2 ** 3 y 4", bold: false, italic: false }]);
+check("a lone asterisk stays where it is", titleParts("El comodín gram*"), [{ text: "El comodín gram*" }]);
+check("marks that do not close are words after all", titleParts("2 ** 3 y 4"), [{ text: "2 ** 3 y 4" }]);
 check(
   "every word survives the reading, only the marks go",
   titleParts("**A** y *b* con _c_").map((part) => part.text).join(""),
   "A y b con c",
 );
+check(
+  "a highlight is drawn as well, since asking for attention is the point",
+  titleParts("Revisar ==esto== hoy"),
+  [{ text: "Revisar " }, { text: "esto", highlight: true }, { text: " hoy" }],
+);
+check(
+  "and so is a strike",
+  titleParts("~~Viejo~~ Nuevo"),
+  [{ text: "Viejo", strike: true }, { text: " Nuevo" }],
+);
+check(
+  "a mark inside a mark keeps both",
+  titleParts("**un _esto_ dentro**"),
+  [{ text: "un ", bold: true }, { text: "esto", bold: true, italic: true }, { text: " dentro", bold: true }],
+);
+check(
+  "and a highlight inside a bold one does too",
+  titleParts("**Ojo: ==esto== y más**"),
+  [{ text: "Ojo: ", bold: true }, { text: "esto", bold: true, highlight: true }, { text: " y más", bold: true }],
+);
+check(
+  "a highlight that would close at a space is not one",
+  titleParts("un ==dos == tres"),
+  [{ text: "un ==dos == tres" }],
+);
+check("and one that never closes is not one", titleParts("pulsa ==esto"), [{ text: "pulsa ==esto" }]);
 check("an indented subtask keeps its indent", task("  - [ ] Repasar el tema 3 #task").indent, 2);
 check("a tombstone is not a task", parseTaskLine("- [>] Ya se llevó #task", "note.md", 0), null);
 check("neither is a line that is not a task", parseTaskLine("En /home/bautista hay algo", "note.md", 0), null);

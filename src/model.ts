@@ -153,43 +153,143 @@ export function titleOf(rest: string): string {
 }
 
 /**
- * One stretch of a card's title, and how the note asked for it to look.
+ * One stretch of a card's title, and how the note asked for it to look. A flag
+ * is only there when the note asked for that style, so a plain stretch is just
+ * its text.
  */
 export interface TitlePart {
   text: string;
-  bold: boolean;
-  italic: boolean;
+  bold?: boolean;
+  italic?: boolean;
+  strike?: boolean;
+  highlight?: boolean;
 }
 
+interface Style {
+  bold: boolean;
+  italic: boolean;
+  strike: boolean;
+  highlight: boolean;
+}
+
+const PLAIN: Style = { bold: false, italic: false, strike: false, highlight: false };
+
 /**
- * Emphasis in a title, as a mark rather than as a word. Bold was put there to
- * be seen, so the card draws it instead of printing the asterisks; the line
- * keeps them, and that is the only copy of the note's formatting there is.
+ * Emphasis in a title, as a mark rather than as a word.
+ *
+ * Bold was put there to be seen, so the card draws it instead of printing the
+ * asterisks; the same goes for italics, for strikethrough early in a line's
+ * life, and for the highlighter — the one way a note has of asking for
+ * attention in the middle of everything else a board shows. The line keeps
+ * every mark: the card is a reading of it, not a copy.
  *
  * Both notations count, because the vault uses both: `**fuerte**` and
  * `__fuerte__`, `*suave*` and `_suave_`. An underscore inside a word is not
  * emphasis — `set_cap_cfg`, `p_stream` — and neither is a lone asterisk —
  * `gram*` — so both stay exactly as written, which is what Obsidian does too.
- * Nesting is not read: `**un _esto_ dentro**` keeps its inner underscores.
+ * Marks nest, so `**un _esto_ dentro**` is bold and its inner word is italic.
  */
-// An opening mark may not be followed by a space, nor a closing one preceded by
-// one: `2 ** 3` is arithmetic, not bold. The triple form is tried first.
-const EMPHASIS =
-  /\*\*\*(?!\s)([^*\n]+?)(?<!\s)\*\*\*|___(?!\s)([^_\n]+?)(?<!\s)___|\*\*(?!\s)([^*\n]+?)(?<!\s)\*\*|__(?!\s)([^_\n]+?)(?<!\s)__|\*(?![\s*])([^*\n]+?)(?<![\s*])\*(?!\*)|(?<![\w_])_(?![\s_])([^_\n]+?)(?<![\s_])_(?![\w_])/gu;
+// Longest first: at `***` the triple is meant, not a bold and a spare asterisk.
+const MARKS = ["***", "___", "**", "__", "~~", "==", "*", "_"] as const;
 
-/** A title in pieces: the words, and the few stretches the note emphasised. */
+/** The longest mark written at `at`, if any. */
+function markAt(text: string, at: number): string | null {
+  const char = text[at];
+  if (char !== "*" && char !== "_" && char !== "~" && char !== "=") return null;
+  // A mark never starts in the middle of a run: the run was read from its start.
+  if ((char === "*" || char === "_") && text[at - 1] === char) return null;
+  for (const mark of MARKS) if (text.startsWith(mark, at)) return mark;
+  return null;
+}
+
+/** What a mark asks for. */
+function stylesOf(mark: string): Style {
+  if (mark === "~~") return { ...PLAIN, strike: true };
+  if (mark === "==") return { ...PLAIN, highlight: true };
+  const bold = mark.length >= 2;
+  return { bold, italic: !bold || mark.length === 3, strike: false, highlight: false };
+}
+
+const isSpace = (char: string | undefined): boolean => char === undefined || /\s/u.test(char);
+const isWord = (char: string | undefined): boolean => char !== undefined && /\w/u.test(char);
+
+/** Whether a mark can begin here: a space after it is just a space. */
+function opens(text: string, at: number, mark: string): boolean {
+  if (isSpace(text[at + mark.length])) return false;
+  // `set_cap_cfg` is one word, not an italic `cap`.
+  return mark[0] !== "_" || !isWord(text[at - 1]);
+}
+
+/** Where the mark that started before `from` ends, or `-1` if it never does. */
+function closes(text: string, from: number, mark: string): number {
+  for (let at = from; at < text.length; at += 1) {
+    if (markAt(text, at) !== mark) continue;
+    // A closing mark never starts at a space, nor closes a word it is inside of.
+    if (isSpace(text[at - 1])) continue;
+    if (mark[0] === "_" && isWord(text[at + mark.length])) continue;
+    return at;
+  }
+  return -1;
+}
+
+/** Reads the marks of `text`, and keeps its words in the style they were written in. */
+function read(text: string, style: Style, out: TitlePart[]): void {
+  let at = 0;
+  let i = 0;
+  while (i < text.length) {
+    const mark = markAt(text, i);
+    if (mark === null || !opens(text, i, mark)) {
+      i += 1;
+      continue;
+    }
+    const end = closes(text, i + mark.length, mark);
+    // A mark with no closing mark is a character, and stays where it is.
+    if (end === -1) {
+      i += mark.length;
+      continue;
+    }
+    if (i > at) push(out, text.slice(at, i), style);
+    read(text.slice(i + mark.length, end), merge(style, stylesOf(mark)), out);
+    i = end + mark.length;
+    at = i;
+  }
+  if (at < text.length) push(out, text.slice(at), style);
+}
+
+function merge(one: Style, other: Style): Style {
+  return {
+    bold: one.bold || other.bold,
+    italic: one.italic || other.italic,
+    strike: one.strike || other.strike,
+    highlight: one.highlight || other.highlight,
+  };
+}
+
+function push(out: TitlePart[], text: string, style: Style): void {
+  if (text === "") return;
+  const last = out[out.length - 1];
+  const same =
+    last !== undefined &&
+    (last.bold === true) === style.bold &&
+    (last.italic === true) === style.italic &&
+    (last.strike === true) === style.strike &&
+    (last.highlight === true) === style.highlight;
+  if (same) {
+    last.text += text;
+    return;
+  }
+  const part: TitlePart = { text };
+  if (style.bold) part.bold = true;
+  if (style.italic) part.italic = true;
+  if (style.strike) part.strike = true;
+  if (style.highlight) part.highlight = true;
+  out.push(part);
+}
+
+/** A title in pieces: the words, and the stretches the note emphasised. */
 export function titleParts(title: string): TitlePart[] {
   const parts: TitlePart[] = [];
-  let at = 0;
-  EMPHASIS.lastIndex = 0;
-  for (let match = EMPHASIS.exec(title); match !== null; match = EMPHASIS.exec(title)) {
-    const raw = match[0];
-    const marks = raw.startsWith("***") || raw.startsWith("___") ? 3 : raw.startsWith("**") || raw.startsWith("__") ? 2 : 1;
-    if (match.index > at) parts.push({ text: title.slice(at, match.index), bold: false, italic: false });
-    parts.push({ text: raw.slice(marks, raw.length - marks), bold: marks >= 2, italic: marks !== 2 });
-    at = match.index + raw.length;
-  }
-  if (at < title.length) parts.push({ text: title.slice(at), bold: false, italic: false });
+  read(title, { ...PLAIN }, parts);
   return parts;
 }
 

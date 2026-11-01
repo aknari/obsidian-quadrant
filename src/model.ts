@@ -152,6 +152,47 @@ export function titleOf(rest: string): string {
   return text.replace(/\s+/gu, " ").trim();
 }
 
+/**
+ * One stretch of a card's title, and how the note asked for it to look.
+ */
+export interface TitlePart {
+  text: string;
+  bold: boolean;
+  italic: boolean;
+}
+
+/**
+ * Emphasis in a title, as a mark rather than as a word. Bold was put there to
+ * be seen, so the card draws it instead of printing the asterisks; the line
+ * keeps them, and that is the only copy of the note's formatting there is.
+ *
+ * Both notations count, because the vault uses both: `**fuerte**` and
+ * `__fuerte__`, `*suave*` and `_suave_`. An underscore inside a word is not
+ * emphasis — `set_cap_cfg`, `p_stream` — and neither is a lone asterisk —
+ * `gram*` — so both stay exactly as written, which is what Obsidian does too.
+ * Nesting is not read: `**un _esto_ dentro**` keeps its inner underscores.
+ */
+// An opening mark may not be followed by a space, nor a closing one preceded by
+// one: `2 ** 3` is arithmetic, not bold. The triple form is tried first.
+const EMPHASIS =
+  /\*\*\*(?!\s)([^*\n]+?)(?<!\s)\*\*\*|___(?!\s)([^_\n]+?)(?<!\s)___|\*\*(?!\s)([^*\n]+?)(?<!\s)\*\*|__(?!\s)([^_\n]+?)(?<!\s)__|\*(?![\s*])([^*\n]+?)(?<![\s*])\*(?!\*)|(?<![\w_])_(?![\s_])([^_\n]+?)(?<![\s_])_(?![\w_])/gu;
+
+/** A title in pieces: the words, and the few stretches the note emphasised. */
+export function titleParts(title: string): TitlePart[] {
+  const parts: TitlePart[] = [];
+  let at = 0;
+  EMPHASIS.lastIndex = 0;
+  for (let match = EMPHASIS.exec(title); match !== null; match = EMPHASIS.exec(title)) {
+    const raw = match[0];
+    const marks = raw.startsWith("***") || raw.startsWith("___") ? 3 : raw.startsWith("**") || raw.startsWith("__") ? 2 : 1;
+    if (match.index > at) parts.push({ text: title.slice(at, match.index), bold: false, italic: false });
+    parts.push({ text: raw.slice(marks, raw.length - marks), bold: marks >= 2, italic: marks !== 2 });
+    at = match.index + raw.length;
+  }
+  if (at < title.length) parts.push({ text: title.slice(at), bold: false, italic: false });
+  return parts;
+}
+
 function tagsOf(raw: string): string[] {
   const tags: string[] = [];
   TAG.lastIndex = 0;

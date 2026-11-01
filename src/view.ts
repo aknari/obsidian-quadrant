@@ -21,6 +21,7 @@ import {
   laneOf,
   matchesFilter,
   sortTasks,
+  titleParts,
   todayOf,
   windowLabel,
   type DoneWindow,
@@ -238,7 +239,7 @@ export class Board {
     el.dataset.line = String(task.line);
     el.setAttr("title", `${task.path}:${task.line + 1} — click to open at that line`);
 
-    el.createDiv({ cls: "q-task-title", text: task.title === "" ? "(untitled)" : task.title });
+    this.titleEl(el, task.title);
 
     const meta = el.createDiv({ cls: "q-task-meta" });
     const note = task.path.split("/").pop()?.replace(/\.md$/u, "") ?? task.path;
@@ -335,6 +336,18 @@ export class Board {
     );
   }
 
+  /** The card's title, with the note's bold and italics drawn rather than spelled. */
+  private titleEl(parent: HTMLElement, title: string): HTMLElement {
+    const el = parent.createDiv({ cls: "q-task-title" });
+    for (const part of titleParts(title === "" ? "(untitled)" : title)) {
+      if (part.bold && part.italic) el.createEl("strong").createEl("em", { text: part.text });
+      else if (part.bold) el.createEl("strong", { text: part.text });
+      else if (part.italic) el.createEl("em", { text: part.text });
+      else el.createSpan({ text: part.text });
+    }
+    return el;
+  }
+
   private taskEl(task: MatrixTask): HTMLElement {
     const el = document.createElement("div");
     el.addClass("q-task");
@@ -345,7 +358,7 @@ export class Board {
     if (task.priority !== null) el.dataset.priority = task.priority;
     el.setAttr("title", `${task.path}:${task.line + 1} — click to open at that line, drag to place it or to finish it`);
 
-    el.createDiv({ cls: "q-task-title", text: task.title === "" ? "(untitled)" : task.title });
+    this.titleEl(el, task.title);
 
     const meta = el.createDiv({ cls: "q-task-meta" });
     const note = task.path.split("/").pop()?.replace(/\.md$/u, "") ?? task.path;

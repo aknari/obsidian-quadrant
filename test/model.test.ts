@@ -36,6 +36,7 @@ import {
   setQuadrant,
   sortTasks,
   taskKey,
+  titleParts,
   todayOf,
   toggleCondition,
   windowLabel,
@@ -89,6 +90,45 @@ check("a target full of parentheses is still a target", task("- [ ] Ver [el PDF]
 check("and so is one in angle brackets", task("- [ ] Mira [esto](<file:///x/con espacio.pdf>) #task").title, "Mira esto");
 check("a link with no words leaves nothing behind", task("- [ ] Ver [](file:///x/a.pdf) y listo #task").title, "Ver y listo");
 check("an embed is not text either", task("- [ ] Revisar ![esquema](file:///x/esquema.png) del tema #task").title, "Revisar del tema");
+check(
+  "bold is a mark the card draws, not a word in the text",
+  task("- [ ] Repasar **el tema 3** y a otra cosa #task").title,
+  "Repasar **el tema 3** y a otra cosa",
+);
+check(
+  "and it is read as styling",
+  titleParts("Repasar **el tema 3**"),
+  [
+    { text: "Repasar ", bold: false, italic: false },
+    { text: "el tema 3", bold: true, italic: false },
+  ],
+);
+check(
+  "italics come in both notations, and bold in both too",
+  ["*uno*", "_dos_", "__tres__"].map((one) => titleParts(one)),
+  [
+    [{ text: "uno", bold: false, italic: true }],
+    [{ text: "dos", bold: false, italic: true }],
+    [{ text: "tres", bold: true, italic: false }],
+  ],
+);
+check(
+  "both at once is both",
+  titleParts("***esto***"),
+  [{ text: "esto", bold: true, italic: true }],
+);
+check(
+  "an underscore inside a word is not emphasis",
+  titleParts("Llamar a set_cap_cfg() y a p_stream"),
+  [{ text: "Llamar a set_cap_cfg() y a p_stream", bold: false, italic: false }],
+);
+check("a lone asterisk stays where it is", titleParts("El comodín gram*"), [{ text: "El comodín gram*", bold: false, italic: false }]);
+check("marks that do not close are words after all", titleParts("2 ** 3 y 4"), [{ text: "2 ** 3 y 4", bold: false, italic: false }]);
+check(
+  "every word survives the reading, only the marks go",
+  titleParts("**A** y *b* con _c_").map((part) => part.text).join(""),
+  "A y b con c",
+);
 check("an indented subtask keeps its indent", task("  - [ ] Repasar el tema 3 #task").indent, 2);
 check("a tombstone is not a task", parseTaskLine("- [>] Ya se llevó #task", "note.md", 0), null);
 check("neither is a line that is not a task", parseTaskLine("En /home/bautista hay algo", "note.md", 0), null);

@@ -8,17 +8,20 @@
  *
  * Three rules decide what the matrix may write:
  *
- *  - **The quadrant is the matrix's own field.** `[eisenhower:: 1]` … `[eisenhower:: 5]`,
+ *  - **The quadrant is the matrix's own field.** `[quadrant:: 1]` … `[quadrant:: 5]`,
  *    a Dataview inline field on the line itself, replaced in place if it is
- *    there and appended at the end if it is not. Operon's `{{priority::}}` is
- *    never touched: what Operon calls A, B or C is the user's judgement and a
- *    quadrant is a different question.
+ *    there and appended at the end if it is not. The field was written as
+ *    `[eisenhower:: n]` until 0.5.0; that name is still read, so no note had to
+ *    be rewritten for the board to keep working (`renameQuadrantField` does it
+ *    for the whole vault when asked), but nothing new is written with it.
+ *    Operon's `{{priority::}}` is never touched: what Operon calls A, B or C is
+ *    the user's judgement and a quadrant is a different question.
  *  - **Dropped is Operon's, when Operon owns the task.** An Operon line put in
  *    the dropped lane gets `{{status:: Project.Dropped}}`, which is exactly
  *    what Operon writes when you drop it there; bringing it back sets
  *    `Project.Planned`. A plain line has no such status, so dropping it means
  *    what it means everywhere else in the vault: `- [-]`, the cancelled line
- *    the daily notes already use, plus `[eisenhower:: 5]` so the board can
+ *    the daily notes already use, plus `[quadrant:: 5]` so the board can
  *    still find it. Bringing it back sets `- [ ]` again.
  *  - **Finishing is the vault's own notation.** A task dropped on the Done
  *    lane is ticked and stamped `✅ today`; an Operon task also gets
@@ -76,7 +79,14 @@ export interface MatrixTask {
 const TASK_LINE = /^(\s*)- \[([^\]\n])\]\s?(.*)$/u;
 const OPERON_FIELD = /\{\{\s*([^{}]*?)\s*::\s*([^{}]*?)\s*\}\}/gu;
 const INLINE_FIELD = /\[\s*([A-Za-z][\w-]*)\s*::\s*([^\]]*?)\s*\]/gu;
-const QUADRANT = /\[\s*eisenhower\s*::\s*([^\]]*?)\s*\]/u;
+/**
+ * The field the matrix writes, and the one it used to write. Both are read, so
+ * a note that predates the rename needs no edit to keep its place; only
+ * `quadrant` is ever written.
+ */
+const QUADRANT = /\[\s*(?:quadrant|eisenhower)\s*::\s*([^\]]*?)\s*\]/u;
+/** The old name alone, which is what the one-off rename looks for. */
+const LEGACY_QUADRANT = /\[\s*eisenhower\s*::\s*([^\]]*?)\s*\]/u;
 const TAG = /(^|\s)(#[^\s#[\](){}"'`]+)/gu;
 
 /** The decorations a task line carries that are not part of its text. */
@@ -684,7 +694,7 @@ export function taskKey(raw: string): string {
 
 /** The line with its quadrant replaced in place, or added at the end. */
 export function setQuadrant(raw: string, quadrant: number): string {
-  const field = `[eisenhower:: ${quadrant}]`;
+  const field = `[quadrant:: ${quadrant}]`;
   if (QUADRANT.test(raw)) return raw.replace(QUADRANT, field);
   return `${raw.trimEnd()} ${field}`;
 }
@@ -713,10 +723,23 @@ export function setCompletedStamp(raw: string, day: string): string {
   return `${raw.trimEnd()} ✅ ${day}`;
 }
 
-/** The line with its quadrant field removed. */
+/** The line with its quadrant field removed, whichever name it carries. */
 export function clearQuadrant(raw: string): string {
   if (!QUADRANT.test(raw)) return raw;
   return raw.replace(QUADRANT, "").replace(/\s+$/u, "");
+}
+
+/**
+ * The line with the old `[eisenhower:: n]` field written as `[quadrant:: n]`,
+ * or `null` when the line has no old field. Only the name of the field changes:
+ * the value, its place in the line and everything around it stay.
+ *
+ * The board reads both names, so this is housekeeping rather than a migration:
+ * skipping it changes nothing, and running it twice changes nothing either.
+ */
+export function renameQuadrantField(raw: string): string | null {
+  if (!LEGACY_QUADRANT.test(raw)) return null;
+  return raw.replace(LEGACY_QUADRANT, (_match, value: string) => `[quadrant:: ${value.trim()}]`);
 }
 
 /** An Operon `{{key:: value}}` field replaced in place, or added at the end. */

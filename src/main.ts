@@ -13,8 +13,10 @@
  */
 
 import {
+  App,
   MarkdownPostProcessorContext,
   MarkdownRenderChild,
+  Modal,
   Notice,
   Plugin,
   PluginSettingTab,
@@ -32,6 +34,7 @@ import {
   monthOf,
   planArchive,
   plainTaskVisible,
+  renameQuadrantField,
   scanNote,
   taskKey,
   todayOf,
@@ -142,6 +145,7 @@ export default class QuadrantPlugin extends Plugin implements MatrixHost {
     this.addCommand({ id: "open-dialog", name: "Open the matrix in a dialog", callback: () => { this.openDialog(); } });
     this.addCommand({ id: "refresh", name: "Refresh the matrix", callback: () => { void this.refresh(); } });
     this.addCommand({ id: "archive", name: "Archive finished and dropped tasks...", callback: () => { void this.archiveOldTasks(); } });
+    this.addCommand({ id: "rename-quadrant-field", name: "Rename the old quadrant field to [quadrant:: n]", callback: () => { void this.renameQuadrantFieldEverywhere(); } });
     this.addSettingTab(new QuadrantSettingsTab(this));
     this.registerEvent(this.app.vault.on("modify", () => { this.schedule(); }));
   }
@@ -510,9 +514,98 @@ export default class QuadrantPlugin extends Plugin implements MatrixHost {
     await this.app.vault.create(path, `# Tareas archivadas — ${month}\n\n${block}\n`);
   }
 
+  /**
+   * The command: the old `[eisenhower:: n]` field written as `[quadrant:: n]`
+   * across the vault.
+   *
+   * Nothing depends on it — the board reads both names, so every placed task
+   * keeps its lane either way — and that is exactly why it is offered as
+   * housekeeping: it says how many lines and notes it would touch, it touches
+   * nothing else on them, and running it twice changes nothing.
+   */
+  async renameQuadrantFieldEverywhere(): Promise<void> {
+    const notes: string[] = [];
+    let lines = 0;
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      const content = await this.app.vault.cachedRead(file);
+      if (!content.includes("eisenhower::")) continue;
+      const found = content.split("\n").filter((line) => renameQuadrantField(line) !== null).length;
+      if (found === 0) continue;
+      lines += found;
+      notes.push(file.path);
+    }
+    if (lines === 0) {
+      new Notice("Quadrant: no line uses the old [eisenhower:: n] field.");
+      return;
+    }
+    new RenameFieldModal(this.app, lines, notes.length, () => { void this.renameInNotes(notes); }).open();
+  }
+
+  /**
+   * Writes the new name into the given notes, re-reading each one just before
+   * it is written. Only the field's name changes: the value, its place in the
+   * line and everything around it stay, and a line that no longer carries the
+   * old field is left as it now is.
+   */
+  private async renameInNotes(paths: string[]): Promise<void> {
+    let renamed = 0;
+    for (const path of paths) {
+      const file = this.app.vault.getAbstractFileByPath(path);
+      if (!(file instanceof TFile)) continue;
+      try {
+        await this.app.vault.process(file, (content) => content.split("\n").map((line) => {
+          const next = renameQuadrantField(line);
+          if (next === null) return line;
+          renamed += 1;
+          return next;
+        }).join("\n"));
+      } catch (error) {
+        console.error(`[quadrant] could not rewrite ${path}`, error);
+      }
+    }
+    new Notice(renamed === 1 ? "Quadrant: 1 line now says [quadrant:: n]." : `Quadrant: ${renamed} lines now say [quadrant:: n].`);
+    await this.refresh();
+  }
+
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
     await this.refresh();
+  }
+}
+
+/**
+ * The one-off rename, shown before it happens.
+ *
+ * It rewrites lines in several notes, so it says how many first — and that the
+ * value, the line and everything else in it stay. The board reads both names,
+ * which is why Cancel is a perfectly good answer.
+ */
+class RenameFieldModal extends Modal {
+  constructor(
+    app: App,
+    private lines: number,
+    private notes: number,
+    private run: () => void,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    this.contentEl.empty();
+    this.contentEl.createEl("h3", { text: this.lines === 1 ? "Rename 1 line?" : `Rename ${this.lines} lines?` });
+    const where = this.notes === 1 ? "1 note" : `${this.notes} notes`;
+    this.contentEl.createEl("p", {
+      cls: "setting-item-description",
+      text: `The old [eisenhower:: n] field becomes [quadrant:: n], in ${where}. Only the name changes: the value and the rest of the line stay as they are. The board reads both names, so skipping this changes nothing.`,
+    });
+    const buttons = this.contentEl.createDiv({ cls: "q-archive-buttons" });
+    const cancel = buttons.createEl("button", { text: "Cancel", cls: "q-archive-cancel" });
+    cancel.addEventListener("click", () => this.close());
+    const go = buttons.createEl("button", { text: "Rename", cls: "q-archive-go mod-cta" });
+    go.addEventListener("click", () => {
+      this.close();
+      this.run();
+    });
   }
 }
 
@@ -566,7 +659,7 @@ class QuadrantSettingsTab extends PluginSettingTab {
 
     containerEl.createEl("p", {
       cls: "setting-item-description",
-      text: "Dropping a task in a quadrant writes [eisenhower:: 1] … [eisenhower:: 4] on its line. Dropping it in Dropped writes Operon's {{status:: Project.Dropped}} when the task is Operon's, and '- [-]' plus [eisenhower:: 5] when it is a plain task. Bringing a dropped task back sets Operon's status to Project.Planned, or the checkbox back to '- [ ]'. Operon's {{priority::}} is never touched, and the quadrant stays on a line finished through the Done lane.",
+      text: "Dropping a task in a quadrant writes [quadrant:: 1] … [quadrant:: 4] on its line. Dropping it in Dropped writes Operon's {{status:: Project.Dropped}} when the task is Operon's, and '- [-]' plus [quadrant:: 5] when it is a plain task. Bringing a dropped task back sets Operon's status to Project.Planned, or the checkbox back to '- [ ]'. The old name [eisenhower:: n] is still read, so nothing has to be edited by hand; the command that renames it across the vault leaves every line exactly where it is on the board. Operon's {{priority::}} is never touched, and the quadrant stays on a line finished through the Done lane.",
     });
 
     new Setting(containerEl)

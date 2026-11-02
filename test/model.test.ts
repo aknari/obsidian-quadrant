@@ -24,6 +24,7 @@ import {
   archiveBlock,
   archiveCutoff,
   clearQuadrant,
+  renameQuadrantField,
   createdOf,
   monthOf,
   planArchive,
@@ -297,15 +298,17 @@ check("an empty list imposes no limit", plainTaskVisible(elsewhere, []), true);
 
 console.log("\nWriting the quadrant");
 
-check("a quadrant is appended when the line has none", setQuadrant("- [ ] X #task", 3), "- [ ] X #task [eisenhower:: 3]");
-check("and replaced in place when it has one", setQuadrant("- [ ] X #task [eisenhower:: 1]", 4), "- [ ] X #task [eisenhower:: 4]");
-check("a quadrant can be taken away", clearQuadrant("- [ ] X #task [eisenhower:: 4]"), "- [ ] X #task");
-check("the Operon block stays where it was", setQuadrant("- [ ] X {{operonId:: abc}}", 2), "- [ ] X {{operonId:: abc}} [eisenhower:: 2]");
+check("a quadrant is appended when the line has none", setQuadrant("- [ ] X #task", 3), "- [ ] X #task [quadrant:: 3]");
+check("and replaced in place when it has one", setQuadrant("- [ ] X #task [quadrant:: 1]", 4), "- [ ] X #task [quadrant:: 4]");
+check("an old eisenhower field is replaced by the new name", setQuadrant("- [ ] X #task [eisenhower:: 1]", 4), "- [ ] X #task [quadrant:: 4]");
+check("a quadrant can be taken away", clearQuadrant("- [ ] X #task [quadrant:: 4]"), "- [ ] X #task");
+check("and the old spelling is taken away too", clearQuadrant("- [ ] X #task [eisenhower:: 4]"), "- [ ] X #task");
+check("the Operon block stays where it was", setQuadrant("- [ ] X {{operonId:: abc}}", 2), "- [ ] X {{operonId:: abc}} [quadrant:: 2]");
 
 console.log("\nDropping and reviving");
 
-check("a plain task dropped is cancelled, as the vault writes it", applyMove("- [ ] X #task", DROPPED), "- [-] X #task [eisenhower:: 5]");
-check("an indented plain task dropped keeps its indent", applyMove("  - [ ] X #task", DROPPED), "  - [-] X #task [eisenhower:: 5]");
+check("a plain task dropped is cancelled, as the vault writes it", applyMove("- [ ] X #task", DROPPED), "- [-] X #task [quadrant:: 5]");
+check("an indented plain task dropped keeps its indent", applyMove("  - [ ] X #task", DROPPED), "  - [-] X #task [quadrant:: 5]");
 check(
   "an Operon task dropped gets Operon's own status",
   applyMove("- [ ] X {{operonId:: abc}} {{status:: Project.Planned}}", DROPPED),
@@ -314,7 +317,7 @@ check(
 check(
   "an Operon task revived goes back to Planned and lands in its quadrant",
   applyMove("- [ ] X {{operonId:: abc}} {{status:: Project.Dropped}}", 2),
-  "- [ ] X {{operonId:: abc}} {{status:: Project.Planned}} [eisenhower:: 2]",
+  "- [ ] X {{operonId:: abc}} {{status:: Project.Planned}} [quadrant:: 2]",
 );
 check(
   "a plain task revived from the dropped lane loses the field",
@@ -324,7 +327,7 @@ check(
 check(
   "and one revived into a quadrant is pending again there",
   applyMove("- [-] X #task [eisenhower:: 5]", 3),
-  "- [ ] X #task [eisenhower:: 3]",
+  "- [ ] X #task [quadrant:: 3]",
 );
 check(
   "the priority of Operon is never rewritten",
@@ -365,10 +368,27 @@ console.log("\nRecognising the line again");
 check("moving a plain task does not change its identity", taskKey("- [ ] X #task"), taskKey("- [ ] X #task [eisenhower:: 2]"));
 check("moving an Operon task does not either", taskKey("- [ ] X {{operonId:: abc}}"), taskKey("- [ ] X [eisenhower:: 4] {{operonId:: abc}}"));
 check("but any other edit does", taskKey("- [ ] X #task") === taskKey("- [ ] X, corregida #task"), false);
+check("the old field and the new one are one identity", taskKey("- [ ] X #task [eisenhower:: 3]"), taskKey("- [ ] X #task [quadrant:: 4]"));
+
+console.log("\nRenaming the old field");
+
+check(
+  "the old name becomes the new one, and nothing else changes",
+  renameQuadrantField("- [ ] X #task [eisenhower:: 2] ➕ 2026-10-01"),
+  "- [ ] X #task [quadrant:: 2] ➕ 2026-10-01",
+);
+check("a line already renamed is left alone", renameQuadrantField("- [ ] X #task [quadrant:: 2]"), null);
+check("and so is a line with no quadrant at all", renameQuadrantField("- [ ] X #task"), null);
+check(
+  "renaming twice changes nothing more",
+  renameQuadrantField(renameQuadrantField("- [ ] X #task [eisenhower:: 5]") ?? ""),
+  null,
+);
 
 console.log("\nThe lane a task belongs to");
 
-check("a quadrant field is its lane", laneOf(task("- [ ] X #task [eisenhower:: 3]")), 3);
+check("a quadrant field is its lane", laneOf(task("- [ ] X #task [quadrant:: 3]")), 3);
+check("and the old spelling still puts it there", laneOf(task("- [ ] X #task [eisenhower:: 3]")), 3);
 check("a task with no quadrant waits in the inbox", laneOf(task("- [ ] X #task")), 0);
 check("a dropped Operon task is dropped even if it kept a quadrant", laneOf(task("- [ ] X {{operonId:: abc}} {{status:: Project.Dropped}} [eisenhower:: 2]")), DROPPED);
 check("a plain task dropped by the field is dropped too", laneOf(task("- [ ] X #task [eisenhower:: 5]")), DROPPED);

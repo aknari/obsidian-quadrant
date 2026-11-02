@@ -22,7 +22,7 @@ Quadrant is not in Obsidian's community plugin list. Obsidian **1.5.0 or newer**
 
 - **Four quadrants, an inbox and a dropped lane.** Pending tasks with no quadrant wait in *Unclassified*; tasks you have given up on sit in *Dropped*, out of the way but still visible.
 - **Both kinds of task.** Operon tasks (recognised by their `{{operonId:: ...}}`) and plain `#task` lines, side by side, each card showing its note, its day and its priority.
-- **One field per drop.** A quadrant writes `[eisenhower:: 1]` … `[eisenhower:: 4]` on the line, replaced in place if it is already there. Dropping writes Operon's own `{{status:: Project.Dropped}}` for an Operon task, and `[eisenhower:: 5]` for a plain one.
+- **One field per drop.** A quadrant writes `[quadrant:: 1]` … `[quadrant:: 4]` on the line, replaced in place if it is already there. Dropping writes Operon's own `{{status:: Project.Dropped}}` for an Operon task, and `[quadrant:: 5]` for a plain one. The old name `[eisenhower:: n]` is still read, so no note needs editing after the rename.
 - **Priority, in either notation.** Operon's `{{priority::}}` and the Tasks emoji (`🔺 ⏫ 🔼 🔽 ⏬`, read as S, A, B, C and D) both count, and neither is ever rewritten. Priority orders the cards inside a lane (S, A, B, C, then the rest) and gives the top two a coloured edge: a thick red one for `S`, a thinner orange one for `A`.
 - **Safe writes.** The line is checked against the one the board was drawn from before anything is written. If the note changed underneath, the write is skipped and the board is redrawn — no stale edit lands on the wrong line.
 - **A Done strip, as a record.** What you have finished lately, newest first, with the day on each card and seven marks for the last week. Drop a card on it and that task is finished today. The filters above do not apply to it.
@@ -33,9 +33,9 @@ The four cells carry their meaning under the name — *urgent · important* and 
 
 | Lane | Drop writes |
 | --- | --- |
-| Do now / Schedule / Quick pass / Some day | `[eisenhower:: 1..4]` |
+| Do now / Schedule / Quick pass / Some day | `[quadrant:: 1..4]` |
 | Dropped — Operon task | `{{status:: Project.Dropped}}` |
-| Dropped — plain task | `- [-]` and `[eisenhower:: 5]` |
+| Dropped — plain task | `- [-]` and `[quadrant:: 5]` |
 | Unclassified — Operon task that was dropped | back to `{{status:: Project.Planned}}` |
 | Unclassified — plain task | `- [ ]` again, and the field is removed |
 | Done — plain task | `- [x]` and `✅ today` |
@@ -92,9 +92,11 @@ A card is a pointer to exactly one line, so a click opens that note **at that li
 | Done window | `7` | How far back the Done strip looks: `7`, `30`, or `0` for everything. Set from the chips in the strip, not here; it is saved with the rest. |
 | The ribbon opens the board in | `sidebar` | Where the ribbon icon puts the board: the right sidebar, a tab in the main area, or a dialog. The commands for all three stay available either way. |
 
-## The field is still `eisenhower`
+## The field is `quadrant`
 
-The plugin is called Quadrant, but the field it writes is `[eisenhower:: n]`: it names the method, not the plugin, and it is already written on every line the board has placed. Renaming it would send every placed task back to *Unclassified*.
+A drop writes `[quadrant:: n]` on the line. It used to write `[eisenhower:: n]`, after the method rather than the plugin; since 0.5.0 the field carries the plugin's own name, so one word names the board, the field and the folder it installs into.
+
+Nothing has to be edited by hand for that. **Both names are read**, so every line that still says `[eisenhower:: n]` keeps its place on the board, and it is rewritten as `[quadrant:: n]` the next time you drop it. The command **Quadrant: Rename the old quadrant field** does the same for the whole vault in one pass, saying first how many lines in how many notes it would touch; running it twice changes nothing.
 
 ## What it does not do
 

@@ -117,7 +117,7 @@ async function main(): Promise<void> {
   assert.equal(plugin.__views.has("quadrant-view"), true, "the view is registered");
   assert.deepEqual(
     plugin.__commands.map((c: any) => c.id),
-    ["open-sidebar", "open-tab", "open-dialog", "refresh", "archive"],
+    ["open-sidebar", "open-tab", "open-dialog", "refresh", "archive", "rename-quadrant-field"],
     "the commands, in order",
   );
   assert.equal(plugin.__ribbon.length, 1, "one ribbon icon");
@@ -368,6 +368,34 @@ async function main(): Promise<void> {
   assert.ok(archiveFile.includes(`- [x] Tarea vieja #task ✅ ${OLD}`), "and keeps the line as it was");
   assert.ok(archiveFile.includes("## De [[2026-01-05]]"), "naming the note it came from");
   assert.ok(!archiveFile.includes("Sin fecha"), "nothing undated was taken");
+
+  // --- renaming the old field: housekeeping, and only the name -----------
+  // The board reads both names, so this command exists only to leave the vault
+  // saying one thing. The value and the rest of the line must survive it, and
+  // the lines that need no rename must not be written at all.
+  const legacyNote = "10-journal/daily notes/2026-01-06.md";
+  notes[legacyNote] = [
+    "- [ ] Vieja #task [eisenhower:: 2] ➕ 2026-01-06",
+    "- [ ] Nueva #task [quadrant:: 4]",
+    "- [ ] Sin cuadrante #task",
+  ].join("\n");
+  await plugin.refresh();
+  plugin.__commands.find((c: any) => c.id === "rename-quadrant-field").callback();
+  for (let i = 0; i < 3; i += 1) await flush();
+  const renameModal = (globalThis as any).__modals.at(-1);
+  const renameGo = renameModal.contentEl.all("q-archive-go")[0];
+  assert.equal(renameGo.text, "Rename", "the rename asks before it writes");
+  renameGo.click();
+  for (let i = 0; i < 5; i += 1) await flush();
+  assert.deepEqual(
+    notes[legacyNote].split("\n"),
+    [
+      "- [ ] Vieja #task [quadrant:: 2] ➕ 2026-01-06",
+      "- [ ] Nueva #task [quadrant:: 4]",
+      "- [ ] Sin cuadrante #task",
+    ],
+    "the old name becomes the new one, and the line is otherwise untouched",
+  );
 
   console.log("plugin: all checks passed", {
     tasks: plugin.tasks.length,

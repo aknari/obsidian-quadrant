@@ -31,9 +31,13 @@ import {
   applyMove,
   archiveBlock,
   isDone,
+  laneOf,
   monthOf,
   planArchive,
   plainTaskVisible,
+  orderKey,
+  orderLane,
+  moveInOrder,
   renameQuadrantField,
   scanNote,
   taskKey,
@@ -43,6 +47,7 @@ import {
   type ArchiveCandidate,
   type ArchivePlan,
   type DoneWindow,
+  type LaneOrder,
   type MatrixFilter,
   type MatrixTask,
   type NoteText,
@@ -86,6 +91,8 @@ interface QuadrantSettings {
   archiveDays: number;
   /** Where the ribbon icon opens the board. */
   openIn: BoardPlacement;
+  /** The order each lane was arranged in by hand: lane number → task keys. */
+  order: LaneOrder;
 }
 
 const DEFAULT_SETTINGS: QuadrantSettings = {
@@ -96,6 +103,7 @@ const DEFAULT_SETTINGS: QuadrantSettings = {
   openIn: "sidebar",
   archiveFolder: "10-journal/archive/tareas",
   archiveDays: 30,
+  order: {},
 };
 
 const REFRESH_DELAY = 1200;
@@ -118,6 +126,11 @@ export default class QuadrantPlugin extends Plugin implements MatrixHost {
     return this.settings.doneWindow;
   }
 
+  /** The arrangement of each lane, read by every surface on each draw. */
+  get order(): LaneOrder {
+    return this.settings.order;
+  }
+
   private surfaces = new Set<MatrixSurface>();
   /** The leaf the ribbon put the board in, so “open in a tab” means a tab. */
   private sidebarLeaf: WorkspaceLeaf | null = null;
@@ -127,6 +140,9 @@ export default class QuadrantPlugin extends Plugin implements MatrixHost {
 
   async onload(): Promise<void> {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    // An object of our own: the default is shared between instances, and this
+    // one is written on every drop. A hand-edited data.json may say anything.
+    this.settings.order = { ...(this.settings.order ?? {}) };
     // A `data.json` edited by hand can say anything; a window that is not one
     // of the three would leave the lane unfiltered without saying so.
     if (!DONE_WINDOWS.includes(this.settings.doneWindow)) this.settings.doneWindow = DEFAULT_SETTINGS.doneWindow;
@@ -278,6 +294,7 @@ export default class QuadrantPlugin extends Plugin implements MatrixHost {
       this.tasks = scan.live;
       this.done = scan.done;
       this.lastLoaded = new Date();
+      this.pruneOrder();
     } catch (error) {
       console.error("[quadrant] could not read the vault", error);
       new Notice(`Quadrant: could not read the vault (${String(error)})`);
@@ -377,11 +394,67 @@ export default class QuadrantPlugin extends Plugin implements MatrixHost {
     return result;
   }
 
-  /** Rewrites the single line of a dropped task. */
-  async move(task: MatrixTask, target: number): Promise<void> {
-    const result = await this.rewrite(task, (raw) => applyMove(raw, target));
-    if (result === "stale") new Notice("That line changed since the board was drawn; nothing was written.");
+  /**
+   * Drops a card: into `target`, and before `before` when it landed on a card
+   * (null means the end of the lane).
+   *
+   * A drop inside the lane it came from is a pure reordering: nothing about the
+   * task changes, so the note is not written at all. A drop into another lane
+   * writes the field it always wrote, and then the card is placed where it fell.
+   */
+  async move(task: MatrixTask, target: number, before: string | null = null): Promise<void> {
+    const sameLane = laneOf(task) === target;
+    if (!sameLane) {
+      const result = await this.rewrite(task, (raw) => applyMove(raw, target));
+      if (result === "stale") {
+        new Notice("That line changed since the board was drawn; nothing was written.");
+        await this.refresh();
+        return;
+      }
+    }
+    this.rememberInLane(target, orderKey(task), before);
+    if (sameLane) {
+      this.redraw();
+      return;
+    }
     await this.refresh();
+  }
+
+  /**
+   * Remembers where a card was dropped: the list a lane already had — or, the
+   * first time it is arranged, the order it is being shown in — with the card
+   * taken out and put back before `before` (or at the end).
+   *
+   * It lives in the plugin's data, not in the notes: where a card sits on the
+   * board is the board's own arrangement, and rewriting every line of a lane to
+   * say so would be a worse trade than keeping it here.
+   */
+  private rememberInLane(lane: number, key: string, before: string | null): void {
+    this.settings.order[String(lane)] = moveInOrder(this.laneOrder(lane), key, before);
+    void this.saveData(this.settings);
+  }
+
+  /** A lane's keys in the order it is shown: the arranged ones, then the rest. */
+  private laneOrder(lane: number): string[] {
+    const tasks = this.tasks.filter((candidate) => laneOf(candidate) === lane);
+    return orderLane(tasks, this.settings.order[String(lane)]).map(orderKey);
+  }
+
+  /**
+   * Forgets positions for tasks that are no longer on the board — finished,
+   * archived, deleted, or filtered out by the folder settings — so the data
+   * does not grow with the history of every card ever placed.
+   */
+  private pruneOrder(): void {
+    const keys = new Set(this.tasks.map(orderKey));
+    let changed = false;
+    for (const [lane, list] of Object.entries(this.settings.order)) {
+      const next = list.filter((key) => keys.has(key));
+      if (next.length === list.length) continue;
+      this.settings.order[lane] = next;
+      changed = true;
+    }
+    if (changed) void this.saveData(this.settings);
   }
 
   /**
@@ -444,30 +517,38 @@ export default class QuadrantPlugin extends Plugin implements MatrixHost {
       return;
     }
     const month = monthOf(todayOf());
-    new ArchiveModal(this.app, plan, this.archivePath(month), () => { void this.runArchive(plan); }).open();
+    new ArchiveModal(this.app, plan, this.archivePath(month), (chosen) => { void this.runArchive(chosen); }).open();
   }
 
   /**
    * The archive is written first, then the notes: if this stops halfway, the
    * line exists twice — where it was and in the archive — which can be seen and
-   * undone, instead of once and gone.
+   * undone, instead of once and gone. Only the lines ticked in the dialog move;
+   * the rest stay where they were.
    */
-  private async runArchive(plan: ArchivePlan): Promise<void> {
+  private async runArchive(chosenLines: ArchiveCandidate[]): Promise<void> {
+    if (chosenLines.length === 0) return;
     const month = monthOf(todayOf());
     const path = this.archivePath(month);
     try {
-      await this.appendArchive(path, month, plan.moving);
+      await this.appendArchive(path, month, chosenLines);
     } catch (error) {
       console.error("[quadrant] could not write the archive", error);
       new Notice(`Quadrant: the archive could not be written (${String(error)}); nothing was moved.`);
       return;
     }
 
+    const byNote = new Map<string, ArchiveCandidate[]>();
+    for (const item of chosenLines) {
+      const list = byNote.get(item.path) ?? [];
+      list.push(item);
+      byNote.set(item.path, list);
+    }
+
     let moved = 0;
     let left = 0;
-    for (const rewrite of plan.rewrites) {
-      const chosen = plan.moving.filter((item) => item.path === rewrite.path);
-      const file = this.app.vault.getAbstractFileByPath(rewrite.path);
+    for (const [notePath, chosen] of byNote) {
+      const file = this.app.vault.getAbstractFileByPath(notePath);
       if (!(file instanceof TFile)) {
         left += chosen.length;
         continue;
@@ -488,7 +569,7 @@ export default class QuadrantPlugin extends Plugin implements MatrixHost {
           return lines.join("\n");
         });
       } catch (error) {
-        console.error(`[quadrant] could not rewrite ${rewrite.path}`, error);
+        console.error(`[quadrant] could not rewrite ${notePath}`, error);
         left += chosen.length;
       }
     }

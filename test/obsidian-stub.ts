@@ -59,6 +59,10 @@ export class FakeEl {
   }
 
   setText(text: string): void { this.text = text; }
+  toggleAttribute(name: string, force: boolean): void {
+    if (force) this.attrs[name] = "";
+    else delete this.attrs[name];
+  }
   setAttr(name: string, value: string): void { this.attrs[name] = value; }
   setAttribute(name: string, value: string): void { this.attrs[name] = value; }
   addClass(...classes: string[]): void { classes.forEach((c) => this.classes.add(c)); }

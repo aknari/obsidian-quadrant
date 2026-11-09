@@ -20,13 +20,15 @@ import {
   filterActive,
   laneOf,
   matchesFilter,
-  sortTasks,
+  orderKey,
+  orderLane,
   titleParts,
   todayOf,
   windowLabel,
   type ArchiveCandidate,
   type ArchivePlan,
   type DoneWindow,
+  type LaneOrder,
   type MatrixFilter,
   type MatrixTask,
 } from "./model";
@@ -38,14 +40,16 @@ export const BLOCK_LANGUAGE = "quadrant";
 
 /**
  * The four cells. No Urgent / Important axes are drawn: the hint under each
- * name says which cell it is, and "Quick pass" replaces the usual "Delegate"
+ * name says which cell it is, and "Backlog" replaces the usual "Delegate"
  * because these are tasks you do yourself — handing one to someone else is a
- * note you add, not a drawer the board decides for you.
+ * note you add, not a drawer the board decides for you. "Do now/Doing" says
+ * both what the cell is for and what a card in it means: it is what is on your
+ * hands, not only what is urgent.
  */
 const QUADRANTS: Array<{ n: number; title: string; hint: string }> = [
-  { n: 1, title: "Do now", hint: "urgent · important" },
-  { n: 2, title: "Schedule", hint: "important · not urgent" },
-  { n: 3, title: "Quick pass", hint: "urgent · not important" },
+  { n: 1, title: "Do now/Doing", hint: "urgent · important" },
+  { n: 2, title: "To do", hint: "important · not urgent" },
+  { n: 3, title: "Backlog", hint: "urgent · not important" },
   { n: 4, title: "Some day", hint: "neither urgent nor important" },
 ];
 
@@ -69,9 +73,16 @@ export interface MatrixHost {
   doneWindow: DoneWindow;
   lastLoaded: Date | null;
   filters: MatrixFilter;
+  /** The order each lane was arranged in by hand, by lane number. */
+  order: LaneOrder;
   refresh(): Promise<void>;
   setDoneWindow(window: DoneWindow): void;
-  move(task: MatrixTask, target: number): Promise<void>;
+  /**
+   * Moves a card: into `target`, and before `before` when the drop landed on a
+   * card (null means the end of the lane). A drop inside one lane is a pure
+   * reordering and writes nothing to the note.
+   */
+  move(task: MatrixTask, target: number, before?: string | null): Promise<void>;
   /** Ticks the task's line as finished today; Done is the only lane that writes a completion. */
   finish(task: MatrixTask): Promise<void>;
   openTask(task: MatrixTask): void | Promise<void>;
@@ -123,7 +134,7 @@ export class Board {
       const lane = laneOf(task);
       lanes.get(lane)?.push(task);
     }
-    for (const [lane, tasks] of lanes) lanes.set(lane, sortTasks(tasks));
+    for (const [lane, tasks] of lanes) lanes.set(lane, orderLane(tasks, this.host.order[String(lane)]));
 
     const root = this.container;
     root.empty();
@@ -170,10 +181,13 @@ export class Board {
       this.lane(board, "q-quadrant", quadrant.n, quadrant.title, quadrant.hint, lanes.get(quadrant.n) ?? []);
     }
 
+    // Done goes first: it is what you have just closed, the fastest way to see
+    // the day is moving, and the lane you look at between two tasks. Unclassified
+    // and Dropped follow, because they are the two places work waits.
     const strips = root.createDiv({ cls: "q-strips" });
+    this.doneLane(strips, today);
     this.lane(strips, "q-strip", 0, "Unclassified", "not placed yet", lanes.get(0) ?? []);
     this.lane(strips, "q-strip is-dropped", DROPPED, "Dropped", "out of the way", lanes.get(DROPPED) ?? []);
-    this.doneLane(strips, today);
   }
 
   /**
@@ -294,9 +308,55 @@ export class Board {
         text: filterActive(this.host.filters) ? "Nothing matches the filter." : target === 0 ? "Everything is placed." : "Nothing here.",
       });
     }
-    for (const task of tasks) list.appendChild(this.taskEl(task));
+    for (const [index, task] of tasks.entries()) {
+      const card = this.taskEl(task);
+      list.appendChild(card);
+      const next = tasks[index + 1];
+      this.cardTarget(card, task, target, next === undefined ? null : orderKey(next));
+    }
 
     this.droppable(lane, (event) => this.drop(event, target));
+  }
+
+  /**
+   * Makes a card a place of its own: dropping a card on its top half puts the
+   * dragged one before it, on the bottom half after it. Without this the lane
+   * underneath would claim the drop and only say "this lane", which cannot
+   * express an order.
+   */
+  private cardTarget(card: HTMLElement, task: MatrixTask, lane: number, after: string | null): void {
+    const clear = (): void => {
+      card.removeClass("is-drop-before");
+      card.removeClass("is-drop-after");
+    };
+    card.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      event.stopPropagation?.();
+      if (event.dataTransfer !== null) event.dataTransfer.dropEffect = "move";
+      const top = this.overTop(event, card);
+      card.toggleClass("is-drop-before", top);
+      card.toggleClass("is-drop-after", !top);
+    });
+    card.addEventListener("dragleave", clear);
+    card.addEventListener("drop", (event) => {
+      event.preventDefault();
+      event.stopPropagation?.();
+      clear();
+      const dragged = this.dragged(event);
+      if (dragged === undefined) return;
+      const before = this.overTop(event, card) ? orderKey(task) : after;
+      void this.host.move(dragged, lane, before).catch((error) => {
+        console.error("[quadrant] could not write the task", error);
+        new Notice(`Quadrant: could not write that task (${String(error)})`);
+      });
+    });
+  }
+
+  /** Whether the pointer is on the top half of a card — where "before it" means. */
+  private overTop(event: DragEvent, card: HTMLElement): boolean {
+    const box = typeof card.getBoundingClientRect === "function" ? card.getBoundingClientRect() : null;
+    if (box === null || box.height === 0 || typeof event.clientY !== "number") return true;
+    return event.clientY < box.top + box.height / 2;
   }
 
   /**
@@ -485,27 +545,33 @@ export class BoardModal extends Modal implements MatrixSurface {
  *
  * A move that rewrites several notes is not something to do behind the user's
  * back, so the dialog says how many lines, which notes they come from, where
- * they will land — and what it is leaving alone, because a task with no date of
- * its own cannot be judged old, and silence about that would look like a miss.
+ * they will land — and lets you untick any of them, because a rule that guesses
+ * which tasks are over will guess wrong sometimes and the note is not written
+ * until you say so. It also says what it is leaving alone: a task too recent, a
+ * task with no date to judge it by, and a task that is still open, which the
+ * archive never takes.
  */
 export class ArchiveModal extends Modal {
+  /** The lines still ticked: everything, until you say otherwise. */
+  private chosen = new Set<ArchiveCandidate>();
+
   constructor(
     app: App,
     private plan: ArchivePlan,
     private destination: string,
-    private run: () => void,
+    private run: (chosen: ArchiveCandidate[]) => void,
   ) {
     super(app);
+    for (const item of plan.moving) this.chosen.add(item);
   }
 
   onOpen(): void {
     this.contentEl.empty();
     this.contentEl.addClass("q-archive-modal");
-    const count = this.plan.moving.length;
-    this.contentEl.createEl("h3", { text: count === 1 ? "Archive 1 task?" : `Archive ${count} tasks?` });
+    const heading = this.contentEl.createEl("h3");
     this.contentEl.createEl("p", {
       cls: "setting-item-description",
-      text: `They go to ${this.destination}, and each one leaves "- [>]" behind in its note. Nothing is deleted.`,
+      text: `They go to ${this.destination}, and each one leaves "- [>]" behind in its note. Nothing is deleted. Untick anything you want to keep where it is.`,
     });
 
     const byNote = new Map<string, ArchiveCandidate[]>();
@@ -514,19 +580,28 @@ export class ArchiveModal extends Modal {
       list.push(item);
       byNote.set(item.path, list);
     }
+    const notes = this.contentEl.createDiv({ cls: "q-archive-notes" });
     for (const [path, items] of byNote) {
-      const group = this.contentEl.createDiv({ cls: "q-archive-note" });
+      const group = notes.createDiv({ cls: "q-archive-note" });
       group.createEl("strong", { text: path });
       const list = group.createEl("ul");
-      for (const item of items.slice(0, 6)) {
-        list.createEl("li", { text: item.title === "" ? "(untitled)" : item.title });
+      for (const item of items) {
+        const label = list.createEl("li").createEl("label");
+        const box = label.createEl("input", { attr: { type: "checkbox" } }) as HTMLInputElement;
+        box.checked = true;
+        box.addEventListener("change", () => {
+          if (box.checked) this.chosen.add(item);
+          else this.chosen.delete(item);
+          say();
+        });
+        label.createSpan({ text: item.title === "" ? "(untitled)" : item.title });
       }
-      if (items.length > 6) list.createEl("li", { text: `and ${items.length - 6} more` });
     }
 
     const left: string[] = [];
     if (this.plan.recent > 0) left.push(`${this.plan.recent} too recent`);
     if (this.plan.undated > 0) left.push(`${this.plan.undated} with no date to judge by`);
+    if (this.plan.open > 0) left.push(`${this.plan.open} still open`);
     if (left.length > 0) {
       this.contentEl.createEl("p", { cls: "setting-item-description", text: `Left where they are: ${left.join(", ")}.` });
     }
@@ -536,8 +611,19 @@ export class ArchiveModal extends Modal {
     cancel.addEventListener("click", () => this.close());
     const go = buttons.createEl("button", { text: "Archive", cls: "q-archive-go mod-cta" });
     go.addEventListener("click", () => {
+      const chosen = this.plan.moving.filter((item) => this.chosen.has(item));
+      if (chosen.length === 0) return;
       this.close();
-      this.run();
+      this.run(chosen);
     });
+
+    /** The heading and the button follow the ticks: the count is the promise. */
+    const say = (): void => {
+      const count = this.chosen.size;
+      heading.setText(count === 1 ? "Archive 1 task?" : `Archive ${count} tasks?`);
+      go.setText(count === 0 ? "Archive nothing" : `Archive ${count}`);
+      go.toggleAttribute("disabled", count === 0);
+    };
+    say();
   }
 }

@@ -557,6 +557,59 @@ export function sortTasks(tasks: MatrixTask[]): MatrixTask[] {
   });
 }
 
+/**
+ * The order each lane was arranged in by hand: lane number → the keys of its
+ * tasks, in the order they were put. The keys are the lines' own identities
+ * (`taskKey`), so a line that is edited — text or quadrant — leaves a stale
+ * entry behind, and its task simply falls back to the automatic order instead
+ * of jumping to somebody else's place.
+ */
+export type LaneOrder = Record<string, string[]>;
+
+/** The key a task is remembered by inside a `LaneOrder`. */
+export function orderKey(task: MatrixTask): string {
+  return taskKey(task.raw);
+}
+
+/**
+ * A lane's tasks in the order they are shown: the ones arranged by hand first,
+ * in that order, and everything else after them by the automatic rule —
+ * priority, then the day, then the text.
+ *
+ * So new work never lands above what you arranged: it waits at the bottom of
+ * the lane until you drag it where it belongs. A key that no longer matches a
+ * task is ignored rather than drawn.
+ */
+export function orderLane(tasks: MatrixTask[], stored: readonly string[] | undefined): MatrixTask[] {
+  const automatic = sortTasks(tasks);
+  if (stored === undefined || stored.length === 0) return automatic;
+  const byKey = new Map<string, MatrixTask>();
+  for (const task of automatic) byKey.set(orderKey(task), task);
+  const out: MatrixTask[] = [];
+  for (const key of stored) {
+    const task = byKey.get(key);
+    if (task === undefined) continue;
+    byKey.delete(key);
+    out.push(task);
+  }
+  for (const task of automatic) {
+    const key = orderKey(task);
+    if (byKey.has(key)) out.push(task);
+  }
+  return out;
+}
+
+/**
+ * The arranged list after dropping `moved` before `before` (at the end when
+ * `before` is null). `moved` is taken out of wherever it was first, so the same
+ * call reorders a lane and receives a card from another one.
+ */
+export function moveInOrder(stored: readonly string[], moved: string, before: string | null): string[] {
+  const without = stored.filter((key) => key !== moved);
+  const at = before === null ? -1 : without.indexOf(before);
+  return at < 0 ? [...without, moved] : [...without.slice(0, at), moved, ...without.slice(at)];
+}
+
 /** The local day as `YYYY-MM-DD`, which is how the vault writes days. */
 export function todayOf(date = new Date()): string {
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -866,6 +919,8 @@ export interface ArchivePlan {
   recent: number;
   /** Lines with no date of their own, which the cutoff cannot judge. */
   undated: number;
+  /** Lines that are neither finished nor dropped: work still to do, never taken. */
+  open: number;
 }
 
 export interface ArchiveOptions {
@@ -882,20 +937,30 @@ export interface ArchiveOptions {
  *
  * Only plain lines take part: an Operon task's status is Operon's, and moving
  * its line out of the project note would be editing a record this plugin does
- * not own. A finished line is judged by the day it was finished, a dropped one
- * by the `➕` it carries; a line with neither is left where it is rather than
+ * not own. And only work that is over: a line is a candidate when it is
+ * finished or when it was dropped, never because it is merely old. A pending
+ * line with an old `➕` is old, not abandoned — archiving it would take out of
+ * sight the work you still mean to do, which is the one thing this job must not
+ * do. A finished line is judged by the day it was finished, a dropped one by
+ * the `➕` it carries; a line with neither is left where it is rather than
  * guessed at, because this is the one thing here that edits notes.
  */
 export function planArchive(notes: NoteText[], options: ArchiveOptions): ArchivePlan {
   const cutoff = archiveCutoff(options.today, options.days);
-  const plan: ArchivePlan = { moving: [], rewrites: [], recent: 0, undated: 0 };
+  const plan: ArchivePlan = { moving: [], rewrites: [], recent: 0, undated: 0, open: 0 };
   for (const note of notes) {
     const lines = note.content.split("\n");
     const chosen: ArchiveCandidate[] = [];
     for (const task of scanNote(note.content, note.path, { taskTag: options.taskTag, includeDone: true })) {
       if (task.operonId !== null) continue;
       if (!plainTaskVisible(task, options.folders)) continue;
-      const day = isDone(task) ? task.completed : createdOf(task.raw);
+      const finished = isDone(task);
+      const dropped = task.quadrant === DROPPED;
+      if (!finished && !dropped) {
+        plan.open += 1;
+        continue;
+      }
+      const day = finished ? task.completed : createdOf(task.raw);
       if (day === null) {
         plan.undated += 1;
         continue;

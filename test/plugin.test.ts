@@ -345,6 +345,7 @@ async function main(): Promise<void> {
   notes[archiveSource] = [
     `- [x] Tarea vieja #task ✅ ${OLD}`,
     `- [x] Tarea de ayer #task ✅ ${TODAY}`,
+    `- [ ] Pendiente vieja #task ➕ ${OLD}`,
     `- [-] Descartada hace tiempo #task [eisenhower:: 5] ➕ ${OLD}`,
     "- [-] Sin fecha #task [eisenhower:: 5]",
   ].join("\n");
@@ -360,14 +361,43 @@ async function main(): Promise<void> {
   const source = notes[archiveSource].split("\n");
   assert.equal(source[0], `- [>] Tarea vieja #task ✅ ${OLD}`, "the archived line leaves a tombstone behind");
   assert.equal(source[1], `- [x] Tarea de ayer #task ✅ ${TODAY}`, "a recent one is not touched");
-  assert.equal(source[2], `- [>] Descartada hace tiempo #task [eisenhower:: 5] ➕ ${OLD}`, "a dropped one moves by its own date");
-  assert.equal(source[3], "- [-] Sin fecha #task [eisenhower:: 5]", "and the one with no date stays");
+  assert.equal(source[2], `- [ ] Pendiente vieja #task ➕ ${OLD}`, "an old line still to do is not archived");
+  assert.equal(source[3], `- [>] Descartada hace tiempo #task [eisenhower:: 5] ➕ ${OLD}`, "a dropped one moves by its own date");
+  assert.equal(source[4], "- [-] Sin fecha #task [eisenhower:: 5]", "and the one with no date stays");
 
   const archiveFile = notes[`10-journal/archive/tareas/${TODAY.slice(0, 7)}.md`];
   assert.ok(archiveFile, "the month's file exists");
   assert.ok(archiveFile.includes(`- [x] Tarea vieja #task ✅ ${OLD}`), "and keeps the line as it was");
   assert.ok(archiveFile.includes("## De [[2026-01-05]]"), "naming the note it came from");
   assert.ok(!archiveFile.includes("Sin fecha"), "nothing undated was taken");
+  assert.ok(!archiveFile.includes("Pendiente vieja"), "and nothing still open was taken either");
+
+  // Unticking one line in the dialog leaves it where it is: the job says what
+  // it would do, and you are the one who says what it does.
+  const picky = "10-journal/daily notes/2026-01-07.md";
+  notes[picky] = [
+    `- [x] Una #task ✅ ${OLD}`,
+    `- [x] Otra #task ✅ ${OLD}`,
+  ].join("\n");
+  await plugin.refresh();
+  plugin.__commands.find((c: any) => c.id === "archive").callback();
+  await flush();
+  const pickyModal = (globalThis as any).__modals.at(-1);
+  const walk = (el: any): any[] => [el, ...el.children.flatMap(walk)];
+  const boxes = walk(pickyModal.contentEl).filter((el: any) => el.tagName === "input");
+  assert.equal(boxes.length, 2, "the dialog offers a tick per task, all of them on");
+  const kept = boxes.find((box: any) => box.parent.children[1].text === "Otra");
+  kept.checked = false;
+  for (const fn of kept.listeners.change) fn();
+  const pickyGo = pickyModal.contentEl.all("q-archive-go")[0];
+  assert.equal(pickyGo.text, "Archive 1", "the button counts what is still ticked");
+  pickyGo.click();
+  for (let i = 0; i < 5; i += 1) await flush();
+
+  const pickyLines = notes[picky].split("\n");
+  assert.equal(pickyLines[0], `- [>] Una #task ✅ ${OLD}`, "the ticked line moves");
+  assert.equal(pickyLines[1], `- [x] Otra #task ✅ ${OLD}`, "the unticked one does not, and is not tombstoned");
+  assert.ok(!notes[`10-journal/archive/tareas/${TODAY.slice(0, 7)}.md`].includes("- [x] Otra"), "nor is it written to the archive");
 
   // --- renaming the old field: housekeeping, and only the name -----------
   // The board reads both names, so this command exists only to leave the vault
@@ -396,6 +426,30 @@ async function main(): Promise<void> {
     ],
     "the old name becomes the new one, and the line is otherwise untouched",
   );
+
+  // --- the order inside a lane -------------------------------------------
+  // Dropping a card on another one says where it goes, and the arrangement is
+  // remembered in the plugin's data. Nothing about the task changed, so the
+  // note must not be rewritten for a reordering.
+  const orderNote = "10-journal/daily notes/2026-01-07.md";
+  const orderText = ["- [ ] Zeta #task", "- [ ] Alfa #task"].join("\n");
+  notes[orderNote] = orderText;
+  await plugin.refresh();
+  const cardsIn = (): any[] => liveCards(root).filter((card: any) => card.dataset.path === orderNote);
+  assert.deepEqual(cardsIn().map((card: any) => card.dataset.line), ["1", "0"], "the lane opens in the automatic order");
+  const reorderEvent = {
+    preventDefault() {},
+    stopPropagation() {},
+    relatedTarget: null,
+    clientY: 0,
+    dataTransfer: { getData: () => JSON.stringify({ path: orderNote, line: 0 }), dropEffect: "" },
+  };
+  for (const fn of cardsIn()[0].listeners.drop ?? []) fn(reorderEvent);
+  for (let i = 0; i < 3; i += 1) await flush();
+  assert.deepEqual(cardsIn().map((card: any) => card.dataset.line), ["0", "1"], "dropping Zeta on Alfa puts it first");
+  assert.equal(notes[orderNote], orderText, "and the note is not rewritten to say so");
+  await plugin.refresh();
+  assert.deepEqual(cardsIn().map((card: any) => card.dataset.line), ["0", "1"], "the arrangement outlives a refresh");
 
   console.log("plugin: all checks passed", {
     tasks: plugin.tasks.length,

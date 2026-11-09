@@ -136,8 +136,10 @@
   background-image: linear-gradient(180deg, rgba(var(--color-yellow-rgb), 0.14), transparent 55%);
 }
 
+/* Some day is purple, not green: green belongs to Done now, and two lanes of
+   one colour would undo the point of colouring them at all. */
 .q-quadrant[data-quadrant="4"] {
-  background-image: linear-gradient(180deg, rgba(var(--color-green-rgb), 0.12), transparent 55%);
+  background-image: linear-gradient(180deg, rgba(var(--color-purple-rgb), 0.13), transparent 55%);
 }
 
 .q-quadrant.is-over,
@@ -263,11 +265,19 @@
 
 .q-strips {
   display: grid;
-  grid-template-columns: 1fr 1fr 1.15fr;
+  grid-template-columns: 1.15fr 1fr 1fr;
   gap: 10px;
   max-height: 34%;
   min-height: 96px;
   flex: 0 0 auto;
+}
+
+/* Done is the lane you look for, so its frame is the only one coloured all the
+   way round: a green border and a green wash over the strip say "this is what
+   you have closed" before you read a single card. */
+.q-strip.q-done-strip {
+  border-color: rgba(var(--color-green-rgb), 0.55);
+  background-image: linear-gradient(180deg, rgba(var(--color-green-rgb), 0.14), transparent 55%);
 }
 
 .q-strip.is-dropped {
@@ -400,3 +410,36 @@
     overflow-y: visible;
   }
 }
+
+/* The archive's checklist: one note per block, one tick per line, scrolling
+   inside the dialog so a month's worth of tasks cannot push the buttons off
+   the screen. */
+.q-archive-notes {
+  max-height: 45vh;
+  margin: 8px 0;
+  padding: 6px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  overflow-y: auto;
+}
+
+.q-archive-note ul {
+  margin: 4px 0 8px;
+  padding-left: 0;
+  list-style: none;
+}
+
+.q-archive-note li {
+  font-size: var(--font-ui-small);
+}
+
+.q-archive-note label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  cursor: pointer;
+}
+
+/* Where a card would land: the edge it will sit against. */
+.q-task.is-drop-before { box-shadow: inset 0 3px 0 0 var(--interactive-accent); }
+.q-task.is-drop-after { box-shadow: inset 0 -3px 0 0 var(--interactive-accent); }

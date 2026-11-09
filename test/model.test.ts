@@ -24,6 +24,9 @@ import {
   archiveBlock,
   archiveCutoff,
   clearQuadrant,
+  moveInOrder,
+  orderKey,
+  orderLane,
   renameQuadrantField,
   createdOf,
   monthOf,
@@ -406,6 +409,48 @@ check("Operon priority orders the lane, S first", sorted.map((line) => line.titl
 const byEmoji = sortTasks([task("- [ ] Sin #task"), task("- [ ] Emoji #task 🔼", 1)]);
 check("a plain task with an emoji sorts by its rank, not with the ones that have none", byEmoji.map((line) => line.title), ["Emoji", "Sin"]);
 
+console.log("\nThe order a lane was given by hand");
+
+// The arrangement belongs to the lane, not to the task: the cards it was given
+// first, in that order, and anything new after them in the automatic order. A
+// key that no longer matches a task is ignored, never drawn.
+const laneTasks = [
+  task("- [ ] Zeta #task", 1),
+  task("- [ ] Alfa #task", 0),
+  task("- [ ] Beta #task [quadrant:: 2]", 2),
+];
+const byHand = [orderKey(laneTasks[1]), orderKey(laneTasks[0])];
+check(
+  "the arranged cards come first, in their own order",
+  orderLane([laneTasks[0], laneTasks[1]], byHand).map((line) => line.title),
+  ["Alfa", "Zeta"],
+);
+check(
+  "and one that was never arranged waits after them",
+  orderLane([laneTasks[0], laneTasks[1], laneTasks[2]], byHand).map((line) => line.title),
+  ["Alfa", "Zeta", "Beta"],
+);
+check(
+  "a lane with no arrangement keeps the automatic order",
+  orderLane([laneTasks[0], laneTasks[1]], undefined).map((line) => line.title),
+  ["Alfa", "Zeta"],
+);
+check(
+  "a stale key is ignored rather than drawn",
+  orderLane([laneTasks[0]], ["operon:gone", orderKey(laneTasks[0])]).map((line) => line.title),
+  ["Zeta"],
+);
+check(
+  "dropping before a card puts it in front of it",
+  moveInOrder([orderKey(laneTasks[0]), orderKey(laneTasks[1])], orderKey(laneTasks[1]), orderKey(laneTasks[0])),
+  [orderKey(laneTasks[1]), orderKey(laneTasks[0])],
+);
+check(
+  "dropping at the end appends it",
+  moveInOrder([orderKey(laneTasks[0]), orderKey(laneTasks[1])], orderKey(laneTasks[0]), null),
+  [orderKey(laneTasks[1]), orderKey(laneTasks[0])],
+);
+
 check("an out-of-range quadrant is not a quadrant", quadrantOf("- [ ] X [eisenhower:: 9]"), null);
 
 console.log("\nArchiving");
@@ -417,6 +462,7 @@ const OLD = addDays(ARCHIVE_TODAY, -40);
 const ARCHIVE_NOTE = [
   `- [x] Vieja #task ✅ ${OLD}`,
   `- [x] Reciente #task ✅ ${ARCHIVE_TODAY}`,
+  `- [ ] Pendiente #task ➕ ${OLD}`,
   `- [-] Descartada #task [eisenhower:: 5] ➕ ${OLD}`,
   "- [-] Sin fecha #task [eisenhower:: 5]",
   `- [x] De Operon {{operonId:: zz1}} {{status:: Project.Finished}} {{dateCompleted:: ${OLD}}}`,
@@ -426,12 +472,15 @@ const plan = planArchive([{ path: "10-journal/daily notes/2026-01-01.md", conten
 check("only what is old enough moves", plan.moving.map((item) => item.title), ["Vieja", "Descartada"]);
 check("a recent one is counted, not moved", plan.recent, 1);
 check("and one with no date is left alone", plan.undated, 1);
+check("an old line still to do is not abandoned work: it is never taken", plan.moving.some((item) => item.title === "Pendiente"), false);
+check("and it is counted as still open instead", plan.open, 1);
 check(
   "the source keeps a tombstone, and everything else intact",
   plan.rewrites[0].content.split("\n"),
   [
     `- [>] Vieja #task ✅ ${OLD}`,
     `- [x] Reciente #task ✅ ${ARCHIVE_TODAY}`,
+    `- [ ] Pendiente #task ➕ ${OLD}`,
     `- [>] Descartada #task [eisenhower:: 5] ➕ ${OLD}`,
     "- [-] Sin fecha #task [eisenhower:: 5]",
     `- [x] De Operon {{operonId:: zz1}} {{status:: Project.Finished}} {{dateCompleted:: ${OLD}}}`,

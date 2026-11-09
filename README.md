@@ -27,13 +27,15 @@ Quadrant is not in Obsidian's community plugin list. Obsidian **1.5.0 or newer**
 - **Safe writes.** The line is checked against the one the board was drawn from before anything is written. If the note changed underneath, the write is skipped and the board is redrawn — no stale edit lands on the wrong line.
 - **A Done strip, as a record.** What you have finished lately, newest first, with the day on each card and seven marks for the last week. Drop a card on it and that task is finished today. The filters above do not apply to it.
 
-The four cells carry their meaning under the name — *urgent · important* and so on — rather than drawn Urgent / Important axes, and the third one is **Quick pass**, not *Delegate*: these are your tasks, and handing one to someone else is a note you add, not a drawer the board decides for you.
+The four cells carry their meaning under the name — *urgent · important* and so on — rather than drawn Urgent / Important axes. The first is **Do now/Doing**: what is on your hands, whether it is urgent or simply the thing you are working on. The third is **Backlog**, not *Delegate*: these are your tasks, and handing one to someone else is a note you add, not a drawer the board decides for you.
 
 **Filters** narrow what is on the board without changing anything: *Overdue*, *Next 7 days* and *Priority S/A* — the two top priorities, whether written as `{{priority:: S}}` or as `🔺` / `⏫`. *Overdue* and *Next 7 days* are one axis, so turning one on turns the other off, and priority is another axis that adds to whichever is on. They live in the plugin, so they survive closing the board and every surface shows the same narrowing. The header says how much of the board you are seeing (`7 of 23 live`) and when it was last read, so **Refresh** is never a button you cannot tell from a broken one.
 
+**The order inside a lane is yours.** Drop a card on another one and it lands before or after it — top half or bottom half — and that placement is remembered, lane by lane. Priority still decides where a card arrives the first time; once you arrange a lane, what you arranged stays put and anything new waits at the end until you drag it where it belongs. The arrangement lives in the plugin's data, not in your notes: moving a card inside its own lane rewrites nothing.
+
 | Lane | Drop writes |
 | --- | --- |
-| Do now / Schedule / Quick pass / Some day | `[quadrant:: 1..4]` |
+| Do now/Doing / To do / Backlog / Some day | `[quadrant:: 1..4]` |
 | Dropped — Operon task | `{{status:: Project.Dropped}}` |
 | Dropped — plain task | `- [-]` and `[quadrant:: 5]` |
 | Unclassified — Operon task that was dropped | back to `{{status:: Project.Planned}}` |
@@ -64,7 +66,7 @@ Rendering is at its best in reading view (`Ctrl+E`): in live preview the block d
 
 ## What you have finished
 
-The third strip at the bottom is **Done**. It is not a fifth quadrant, and a card lands there when its line says it is finished — either because you wrote that in the note, or because you dropped the card on the strip and the board wrote it for you.
+The first strip at the bottom is **Done** — first, because it is what you have just closed and the one you look at between tasks; *Unclassified* and *Dropped* follow. It is not a fifth quadrant, and a card lands there when its line says it is finished — either because you wrote that in the note, or because you dropped the card on the strip and the board wrote it for you.
 
 **Finishing by dropping.** Drag any live card onto the strip and that task is finished today: a plain line is ticked and stamped `✅ today`, an Operon line is ticked and given `{{status:: Project.Finished}}` with `{{dateCompleted:: today}}`. Each notation gets what it already reads and nothing else is added. The quadrant is left on the line, so unticking it in the note puts the task back in its cell instead of back in the inbox, and Operon's `{{datetimeModified::}}` is not touched — that timestamp is Operon's to write.
 

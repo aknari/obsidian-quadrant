@@ -11,7 +11,7 @@
  * exists, and the board is just a reading of it.
  */
 
-import { App, ItemView, Modal, Notice, WorkspaceLeaf } from "obsidian";
+import { App, ItemView, Modal, Notice, WorkspaceLeaf, setIcon } from "obsidian";
 import {
   DONE_WINDOWS,
   DROPPED,
@@ -23,6 +23,9 @@ import {
   orderKey,
   orderLane,
   titleParts,
+  focusConflicts,
+  focusLabel,
+  focusTasks,
   todayOf,
   windowLabel,
   type ArchiveCandidate,
@@ -71,12 +74,16 @@ export interface MatrixHost {
    */
   done: MatrixTask[];
   doneWindow: DoneWindow;
+  /** Whether the three strips at the bottom are closed into one line of counts. */
+  stripsCollapsed: boolean;
   lastLoaded: Date | null;
   filters: MatrixFilter;
   /** The order each lane was arranged in by hand, by lane number. */
   order: LaneOrder;
   refresh(): Promise<void>;
   setDoneWindow(window: DoneWindow): void;
+  /** Closes or opens the three strips at the bottom, all three at once. */
+  toggleStrips(): void;
   /**
    * Moves a card: into `target`, and before `before` when the drop landed on a
    * card (null means the end of the lane). A drop inside one lane is a pure
@@ -85,6 +92,8 @@ export interface MatrixHost {
   move(task: MatrixTask, target: number, before?: string | null): Promise<void>;
   /** Ticks the task's line as finished today; Done is the only lane that writes a completion. */
   finish(task: MatrixTask): Promise<void>;
+  /** Puts the session on this task, or takes it off; it asks before it moves one. */
+  focusTask(task: MatrixTask): Promise<void>;
   openTask(task: MatrixTask): void | Promise<void>;
   toggleFilter(key: keyof MatrixFilter): void;
   clearFilters(): void;
@@ -136,6 +145,16 @@ export class Board {
     }
     for (const [lane, tasks] of lanes) lanes.set(lane, orderLane(tasks, this.host.order[String(lane)]));
 
+    // The task you are on is drawn first in its lane, and that is all it takes:
+    // no arrangement is written, so when the mark goes the card is back exactly
+    // where it was, a hand-placed spot included. A reading, not a move.
+    const [focused] = focusTasks(this.host.tasks);
+    if (focused !== undefined) {
+      const list = lanes.get(laneOf(focused));
+      const at = list === undefined ? -1 : list.indexOf(focused);
+      if (list !== undefined && at > 0) list.unshift(...list.splice(at, 1));
+    }
+
     const root = this.container;
     root.empty();
 
@@ -154,6 +173,11 @@ export class Board {
     ];
     if (this.host.lastLoaded !== null && !this.busy) summary.push(`updated ${clock(this.host.lastLoaded)}`);
     header.createSpan({ cls: "q-summary", text: summary.join(" · ") });
+
+    // What you are on, named in one line. It is read from the vault's own mark,
+    // so the sidebar, a tab, a dialog and a note all give the same answer — and
+    // `Sin foco` is a state worth seeing, not an empty space.
+    this.focusBar(root, today);
 
     const refresh = header.createEl("button", {
       cls: "q-refresh",
@@ -184,10 +208,37 @@ export class Board {
     // Done goes first: it is what you have just closed, the fastest way to see
     // the day is moving, and the lane you look at between two tasks. Unclassified
     // and Dropped follow, because they are the two places work waits.
-    const strips = root.createDiv({ cls: "q-strips" });
-    this.doneLane(strips, today);
-    this.lane(strips, "q-strip", 0, "Unclassified", "not placed yet", lanes.get(0) ?? []);
-    this.lane(strips, "q-strip is-dropped", DROPPED, "Dropped", "out of the way", lanes.get(DROPPED) ?? []);
+
+    // The row can be closed, the four cells above never can: the cells are the
+    // decisions the board exists to help you make, and the three strips are
+    // outcomes — what you closed, what you gave up, what you have not placed.
+    // A closed quadrant hides a plan; a closed strip hides a number.
+    //
+    // One control closes all three, because what you want from it is "give me
+    // the height back", which is one decision, not three.
+    const closed = this.host.stripsCollapsed;
+    const strips = root.createDiv({ cls: closed ? "q-strips is-collapsed" : "q-strips" });
+    if (closed) {
+      // Closed, the row does not vanish, it becomes a line of counts. A lane
+      // you cannot see is a lane you forget; "7 unclassified" is small and
+      // permanent, and says what is waiting without taking the room.
+      const line = strips.createEl("button", { cls: "q-strips-line" });
+      line.setAttr("title", "Open Done, Unclassified and Dropped");
+      const count = doneWithin(this.host.done, this.host.doneWindow, today).length;
+      line.createSpan({ cls: "q-strips-line-mark", text: "▸" });
+      line.createSpan({
+        cls: "q-strips-line-text",
+        text: `Done ${count} · Unclassified ${lanes.get(0)?.length ?? 0} · Dropped ${lanes.get(DROPPED)?.length ?? 0}`,
+      });
+      line.addEventListener("click", () => this.host.toggleStrips());
+    } else {
+      const head = this.doneLane(strips, today);
+      const fold = head.createEl("button", { cls: "q-strips-fold", text: "▾" });
+      fold.setAttr("title", "Close Done, Unclassified and Dropped");
+      fold.addEventListener("click", () => this.host.toggleStrips());
+      this.lane(strips, "q-strip", 0, "Unclassified", "not placed yet", lanes.get(0) ?? []);
+      this.lane(strips, "q-strip is-dropped", DROPPED, "Dropped", "out of the way", lanes.get(DROPPED) ?? []);
+    }
   }
 
   /**
@@ -202,7 +253,7 @@ export class Board {
    * "this week" are about work left, and a finished task is never late in a way
    * worth showing.
    */
-  private doneLane(container: HTMLElement, today: string): void {
+  private doneLane(container: HTMLElement, today: string): HTMLElement {
     const window = this.host.doneWindow;
     const tasks = doneWithin(this.host.done, window, today);
     const lane = container.createDiv({ cls: "q-strip q-done-strip" });
@@ -244,6 +295,10 @@ export class Board {
     for (const task of tasks) list.appendChild(this.doneEl(task));
 
     this.droppable(lane, (event) => this.dropDone(event));
+
+    // The head is handed back so the fold control can join the row of chips:
+    // one control, in the first strip, for all three.
+    return head;
   }
 
   /** A finished card: a pointer to its line, and nothing you can drag or place. */
@@ -419,6 +474,38 @@ export class Board {
     return el;
   }
 
+  /**
+   * The line above the board naming the task in focus, or saying there is none.
+   *
+   * It counts every live task the board holds, not the ones a filter leaves: a
+   * filter is a question about work left, and narrowing the board must not
+   * pretend you have stopped working on something. Nothing marked is only worth
+   * saying when there is something to be working on — an empty board is not a
+   * reproach.
+   */
+  private focusBar(container: HTMLElement, today: string): void {
+    const focused = focusTasks(this.host.tasks);
+    if (focused.length === 0) {
+      if (this.host.tasks.length === 0) return;
+      const bar = container.createDiv({ cls: "q-focus-bar" });
+      bar.createSpan({ cls: "q-focus is-none", text: "Sin foco" });
+      return;
+    }
+
+    const task = focused[0];
+    const label = task.focus === null ? "" : focusLabel(task.focus, today);
+    const conflicts = focusConflicts(this.host.tasks);
+    const many = conflicts.length > 1;
+    const el = container.createDiv({ cls: "q-focus-bar" }).createSpan({
+      cls: many ? "q-focus is-conflict" : "q-focus",
+      text: many
+        ? `${conflicts.length} en foco — ${task.title} · ${label}`
+        : `En foco: ${task.title} · ${label}`,
+    });
+    el.setAttr("title", `${task.path}:${task.line + 1}`);
+    if (task.focus !== null && task.focus.slice(0, 10) !== today) el.addClass("is-stale");
+  }
+
   private taskEl(task: MatrixTask): HTMLElement {
     const el = document.createElement("div");
     el.addClass("q-task");
@@ -441,6 +528,36 @@ export class Board {
     }
     if (task.indent > 0) meta.createSpan({ cls: "q-subtask", text: "subtask" });
     for (const tag of task.tags.slice(0, 4)) meta.createSpan({ cls: "q-tag", text: tag });
+
+    // The mark, on the card it belongs to: the header names one task, and this
+    // is what tells you which card that is when the title is not enough.
+    if (task.focus !== null) {
+      const today = todayOf();
+      el.addClass("is-focus");
+      const label = meta.createSpan({ cls: "q-focus-time", text: `En foco · ${focusLabel(task.focus, today)}` });
+      if (task.focus.slice(0, 10) !== today) {
+        el.addClass("is-stale");
+        label.addClass("is-stale");
+      }
+    }
+
+    // The pin. Every live card has one, and it is only drawn when you are
+    // looking at the card: a board of pins at rest would be a board of choices
+    // already made. Once pinned it stays visible, because the control that says
+    // how to stop has no business hiding.
+    const pinned = task.focus !== null;
+    const label = pinned ? "Take the focus off this task" : "Work on this task now";
+    const pin = el.createEl("button", { cls: "q-pin", attr: { "aria-label": label } });
+    pin.setAttr("title", label);
+    setIcon(pin, "pin");
+    pin.addEventListener("click", (event) => {
+      // The card under the button opens its note: a pin is not a click on the card.
+      event?.stopPropagation?.();
+      void Promise.resolve(this.host.focusTask(task)).catch((error) => {
+        console.error("[quadrant] could not move the focus", error);
+        new Notice(`Quadrant: could not move the focus (${String(error)})`);
+      });
+    });
 
     el.addEventListener("dragstart", (event) => {
       const payload: DragPayload = { path: task.path, line: task.line };
@@ -625,5 +742,97 @@ export class ArchiveModal extends Modal {
       go.toggleAttribute("disabled", count === 0);
     };
     say();
+  }
+}
+
+/**
+ * The question before the focus moves.
+ *
+ * Pinning another task is the only way the mark travels, and it is easy to do
+ * by accident when two cards look alike. So the dialog says which session ends
+ * and which begins, and writes nothing until you answer: changing your mind
+ * about what to work on is the normal case, not a mistake — it is worth one
+ * look, because the mark is what the morning is read against.
+ */
+export class FocusModal extends Modal {
+  constructor(
+    app: App,
+    private current: MatrixTask,
+    private next: MatrixTask,
+    private run: () => void,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    this.contentEl.empty();
+    this.contentEl.addClass("q-focus-modal");
+    this.contentEl.createEl("h3", { text: "¿Cambiar el foco?" });
+    const since = this.current.focus === null ? "" : ` (${focusLabel(this.current.focus, todayOf())})`;
+    this.contentEl.createEl("p", {
+      cls: "setting-item-description",
+      text: `«${this.current.title}» está en foco${since}. Si fijas «${this.next.title}», la marca se va de la primera —su tarjeta se queda donde está— y esta pasa a Do now/Doing con la hora de ahora.`,
+    });
+    const buttons = this.contentEl.createDiv({ cls: "q-archive-buttons" });
+    const cancel = buttons.createEl("button", { text: "Seguir con la de ahora", cls: "q-archive-cancel" });
+    cancel.addEventListener("click", () => this.close());
+    const go = buttons.createEl("button", {
+      text: "Cambiar el foco",
+      cls: "q-archive-go mod-cta q-focus-go",
+    });
+    go.addEventListener("click", () => {
+      this.close();
+      this.run();
+    });
+  }
+}
+
+/**
+ * The safety net for a vault that says two things at once.
+ *
+ * The pin cannot leave two marks — it clears the old one before writing the new
+ * — but a hand edit, or two devices editing the same note before a sync, can.
+ * Then the board knows both tasks claim to be what you are on and cannot know
+ * which one you mean, so it asks: here they are with how long each has been
+ * going, pick the one that stays. The others lose the mark and nothing else on
+ * their lines changes.
+ */
+export class FocusConflictModal extends Modal {
+  private keep: MatrixTask;
+
+  constructor(
+    app: App,
+    private marked: MatrixTask[],
+    private run: (keep: MatrixTask) => void,
+  ) {
+    super(app);
+    this.keep = marked[0];
+  }
+
+  onOpen(): void {
+    this.contentEl.empty();
+    this.contentEl.addClass("q-focus-modal");
+    this.contentEl.createEl("h3", { text: `${this.marked.length} tareas en foco a la vez` });
+    this.contentEl.createEl("p", {
+      cls: "setting-item-description",
+      text: "El alfiler no puede dejar dos marcas: esto pasa si una nota se editó a mano o si dos aparatos se pisaron antes de sincronizar. Elige la que sigue en foco; a las demás se les quita la marca y no se toca nada más.",
+    });
+    const today = todayOf();
+    for (const task of this.marked) {
+      const row = this.contentEl.createEl("label", { cls: "q-focus-choice" });
+      const radio = row.createEl("input", { attr: { type: "radio", name: "q-focus-keep" } }) as HTMLInputElement;
+      radio.checked = task === this.keep;
+      radio.addEventListener("change", () => { this.keep = task; });
+      const since = task.focus === null ? "" : ` · ${focusLabel(task.focus, today)}`;
+      row.createSpan({ text: `${task.title}${since}` });
+    }
+    const buttons = this.contentEl.createDiv({ cls: "q-archive-buttons" });
+    const cancel = buttons.createEl("button", { text: "Cancelar", cls: "q-archive-cancel" });
+    cancel.addEventListener("click", () => this.close());
+    const go = buttons.createEl("button", { text: "Dejar una", cls: "q-archive-go mod-cta q-focus-go" });
+    go.addEventListener("click", () => {
+      this.close();
+      this.run(this.keep);
+    });
   }
 }

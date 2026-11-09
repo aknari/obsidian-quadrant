@@ -187,7 +187,8 @@
 }
 
 .q-task {
-  padding: 5px 8px;
+  position: relative;
+  padding: 5px 24px 5px 8px;
   border: 1px solid var(--background-modifier-border);
   border-radius: 6px;
   background: var(--background-primary);
@@ -213,6 +214,108 @@
 
 .q-task[data-priority="A"] {
   border-left: 3px solid var(--color-orange);
+}
+
+/* The task you are on: a ring drawn outside the card, because the edge inside it
+   already says how much the task matters (red for S, orange for A) and two
+   signals in the same place are one signal less. Solid, so it is not read as a
+   drop target, which is what the dashed outline means. An old mark — from
+   another day — is drawn faint and dotted: still there, no longer a session. */
+.q-task.is-focus {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+
+.q-task.is-focus.is-stale {
+  outline: 1px dotted var(--text-faint);
+  outline-offset: 2px;
+}
+
+/* The pin: top right, drawn only while the card is under the pointer — except
+   on the task in focus, where it stays out because it is the one control that
+   says how to stop. It has its own background so it stays legible over a long
+   title. */
+.q-pin {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  display: flex;
+  padding: 2px;
+  border: none;
+  border-radius: 4px;
+  background: var(--background-primary);
+  box-shadow: none;
+  color: var(--text-faint);
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 120ms ease;
+}
+
+.q-pin svg {
+  width: 13px;
+  height: 13px;
+}
+
+.q-task:hover .q-pin {
+  opacity: 1;
+}
+
+.q-pin:hover {
+  background: var(--background-modifier-hover);
+  color: var(--interactive-accent);
+}
+
+.q-task.is-focus .q-pin {
+  opacity: 1;
+  color: var(--interactive-accent);
+}
+
+.q-focus-bar {
+  padding: 0 2px 6px;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.4;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.q-focus {
+  font-weight: 600;
+  color: var(--text-accent);
+}
+
+.q-focus.is-none {
+  font-weight: 400;
+  color: var(--text-faint);
+}
+
+.q-focus.is-stale {
+  font-weight: 400;
+  color: var(--text-faint);
+}
+
+.q-focus.is-conflict {
+  color: var(--color-orange);
+}
+
+.q-focus-time {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.q-focus-time.is-stale {
+  color: var(--text-faint);
+  font-weight: 400;
+}
+
+/* One candidate per line in the dialog that settles two marks: the radio and
+   the task's name on the same row, so the choice reads as a list of tasks. */
+.q-focus-choice {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  padding: 2px 0;
 }
 
 .q-task-title {
@@ -270,6 +373,71 @@
   max-height: 34%;
   min-height: 96px;
   flex: 0 0 auto;
+}
+
+/* The three strips are outcomes, not decisions, so they are the only part of
+   the board that can be closed — and only as a whole row: three chevrons would
+   mean six states to remember and a row that no longer lines up as three
+   columns. Closed, the row keeps its place as one line of counts, so the space
+   comes back and the numbers do not leave the screen. */
+.q-strips.is-collapsed {
+  grid-template-columns: 1fr;
+  min-height: 0;
+  max-height: none;
+}
+
+.q-strips-line {
+  display: block;
+  width: 100%;
+  padding: 5px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-left: 3px solid rgba(var(--color-green-rgb), 0.55);
+  border-radius: 8px;
+  background: var(--background-secondary);
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  text-align: left;
+  cursor: pointer;
+}
+
+.q-strips-line:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-muted);
+}
+
+.q-strips-line-mark {
+  margin-right: 6px;
+  font-size: 10px;
+}
+
+/* The one control for the row, sitting in Done's header because Done opens it.
+   Quiet while you read the lane, but not hidden: a 22×20 target in the theme's
+   muted text, with a fill and a border on hover so it says it can be clicked
+   before you have to aim at it. Bigger than this and it starts competing with
+   the lane's own name. */
+.q-strips-fold {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  min-width: 22px;
+  height: 20px;
+  margin-left: 4px;
+  padding: 0 5px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.q-strips-fold:hover,
+.q-strips-fold:focus-visible {
+  border-color: var(--background-modifier-border);
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
 }
 
 /* Done is the lane you look for, so its frame is the only one coloured all the
@@ -396,8 +564,13 @@
     grid-auto-rows: minmax(96px, auto);
   }
 
+  /* Stacked, the three strips would push the four cells out of a narrow pane:
+     a sidebar of 400px cannot show four cells and three lanes at once. Half of
+     the pane is the most the row may take, and past that it scrolls inside
+     itself, so the cells keep the other half no matter how much is in there. */
   .q-strips {
-    max-height: none;
+    max-height: 50%;
+    overflow-y: auto;
     grid-auto-rows: minmax(96px, auto);
   }
 

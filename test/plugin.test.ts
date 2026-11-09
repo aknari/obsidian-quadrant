@@ -26,7 +26,7 @@ const notes: Record<string, string> = {
   "10-journal/daily notes/2026-10-29.md": [
     "# Jueves",
     "",
-    "- [ ] Escribir el guion del tema 1 #task",
+    `- [ ] Escribir el guion del tema 1 #task [focus:: ${TODAY}T10:32]`,
     "- [ ] Preparar tema 2 {{operonId:: abc123}} {{status:: Project.Planned}} {{priority:: A}} [date:: 2026-10-30]",
     `- [x] Ya está hecho #task ✅ ${TODAY}`,
   ].join("\n"),
@@ -117,7 +117,15 @@ async function main(): Promise<void> {
   assert.equal(plugin.__views.has("quadrant-view"), true, "the view is registered");
   assert.deepEqual(
     plugin.__commands.map((c: any) => c.id),
-    ["open-sidebar", "open-tab", "open-dialog", "refresh", "archive", "rename-quadrant-field"],
+    [
+      "open-sidebar",
+      "open-tab",
+      "open-dialog",
+      "refresh",
+      "archive",
+      "rename-quadrant-field",
+      "clear-extra-focus-marks",
+    ],
     "the commands, in order",
   );
   assert.equal(plugin.__ribbon.length, 1, "one ribbon icon");
@@ -142,6 +150,36 @@ async function main(): Promise<void> {
   assert.equal(root.all("is-done").length, 1, "and the finished one, as a record");
   assert.equal(root.all("q-done-bar").length, 7, "seven marks, one per day");
   assert.equal(root.all("q-done-bar").filter((bar) => bar.classes.size > 1).length, 1, "today's mark is filled");
+
+  // --- the focus is read from the line and painted, never written --------
+  // The mark is the vault's: the board says which task it is and does not touch
+  // the note. `Sin foco` is the other half, because an absence you can see is
+  // the difference between "nothing is marked" and "I forgot".
+  const inFocus = liveCards(root).filter((card) => card.hasClass("is-focus"));
+  assert.equal(inFocus.length, 1, "the marked line is the card drawn in focus");
+  assert.equal(inFocus[0].all("q-focus-time")[0].text.startsWith("En foco · "), true, "and the card says since when");
+  assert.equal(
+    root.all("q-focus")[0].text.startsWith("En foco: Escribir el guion del tema 1 · "),
+    true,
+    "the header names it",
+  );
+  assert.equal(
+    root.all("q-focus").filter((el) => el.hasClass("is-none")).length,
+    0,
+    "and the board does not also say there is none",
+  );
+  assert.equal(
+    notes["10-journal/daily notes/2026-10-29.md"].includes(`[focus:: ${TODAY}T10:32]`),
+    true,
+    "reading the board wrote nothing",
+  );
+
+  notes["10-journal/daily notes/2026-10-29.md"] = notes["10-journal/daily notes/2026-10-29.md"].replace(
+    / \[focus:: [^\]]*\]/u,
+    "",
+  );
+  await plugin.refresh();
+  assert.equal(root.all("q-focus")[0].text, "Sin foco", "no mark reads as Sin foco");
 
   // --- a click opens the note at the task's line ------------------------
   // Priority A sorts first inside the inbox, so the Operon line is card 0.
@@ -191,6 +229,31 @@ async function main(): Promise<void> {
   assert.equal(readCount, readsBefore, "and nothing was read again to do it");
   plugin.setDoneWindow(7);
   assert.equal(plugin.doneWindow, 7, "and back");
+
+  // --- the three strips close as one row, and it is remembered -----------
+  // The row may be closed; the four cells may not, and there is one control for
+  // the three strips rather than three chevrons: it is one decision, not six.
+  assert.equal(plugin.stripsCollapsed, false, "the strips start open");
+  root.all("q-strips-fold")[0].click();
+  await flush();
+  assert.equal(plugin.stripsCollapsed, true, "the row is closed");
+  assert.equal(root.all("q-strip").length, 0, "and the three lanes are gone");
+  assert.equal(root.all("q-quadrant").length, 4, "while the four cells stay");
+  assert.equal(boards()[1].view.contentEl.all("q-strips-line").length, 1, "every surface closes together");
+
+  // Closed is not hidden: the row becomes a line of counts, so nothing leaves
+  // the screen — a lane you cannot see is one you forget.
+  const folded = root.all("q-strips-line")[0];
+  const foldedText = folded.all("q-strips-line-text")[0].text;
+  assert.ok(
+    /^Done 1 · Unclassified \d+ · Dropped \d+$/u.test(foldedText),
+    `the line counts what is in the three lanes (got ${foldedText})`,
+  );
+  folded.click();
+  await flush();
+  assert.equal(plugin.stripsCollapsed, false, "and clicking the line opens them again");
+  assert.equal(root.all("q-strip").length, 3, "all three back, not one");
+  assert.equal(root.all("q-strips-line").length, 0, "the line gives way to the lanes");
 
   // --- the code block: a board inside a note ----------------------------
   const inNote = new FakeEl();
@@ -450,6 +513,119 @@ async function main(): Promise<void> {
   assert.equal(notes[orderNote], orderText, "and the note is not rewritten to say so");
   await plugin.refresh();
   assert.deepEqual(cardsIn().map((card: any) => card.dataset.line), ["0", "1"], "the arrangement outlives a refresh");
+
+  // --- the pin: one session at a time ------------------------------------
+  // Pinning writes two things at once — the mark, and the card's place in Do
+  // now/Doing — and asks before it takes the mark off another task. A second
+  // click on the same pin takes the mark off and moves nothing.
+  const focusNote = "10-journal/daily notes/2026-01-08.md";
+  notes[focusNote] = [
+    "- [ ] Borrador #task [quadrant:: 2]",
+    "- [ ] Guion #task [quadrant:: 3]",
+  ].join("\n");
+  await plugin.refresh();
+  const cardIn = (line: number): any => liveCards(root).find(
+    (card: any) => card.dataset.path === focusNote && card.dataset.line === String(line),
+  );
+  assert.ok(cardIn(0) && cardIn(1), "both tasks of the note are on the board");
+  assert.equal(cardIn(0).all("q-pin").length, 1, "every live card carries the pin");
+  assert.equal(cardIn(0).all("q-pin")[0].attrs["aria-label"], "Work on this task now", "which says what it will do");
+
+  cardIn(0).all("q-pin")[0].click();
+  for (let i = 0; i < 5; i += 1) await flush();
+  let focusLines = notes[focusNote].split("\n");
+  assert.equal(
+    focusLines[0].startsWith(`- [ ] Borrador #task [quadrant:: 1] [focus:: ${TODAY}T`),
+    true,
+    "pinning marks the line and moves it to Do now, in one write",
+  );
+  assert.equal(root.all("q-focus")[0].text.startsWith("En foco: Borrador · "), true, "and the header names it");
+  assert.equal(
+    plugin.settings.order["1"],
+    undefined,
+    "and pinning writes nothing about the order: the front is only how it is drawn",
+  );
+  assert.equal(
+    cardIn(0).all("q-pin")[0].attrs["aria-label"],
+    "Take the focus off this task",
+    "the pin now says how to stop",
+  );
+
+  const modalsBeforeFocus = (globalThis as any).__modals.length;
+  cardIn(1).all("q-pin")[0].click();
+  for (let i = 0; i < 3; i += 1) await flush();
+  assert.equal((globalThis as any).__modals.length, modalsBeforeFocus + 1, "moving the focus asks first");
+  const focusModal = (globalThis as any).__modals.at(-1);
+  assert.equal(focusModal.contentEl.hasClass("q-focus-modal"), true, "the question is the focus one");
+  assert.equal(
+    notes[focusNote].split("\n")[1],
+    "- [ ] Guion #task [quadrant:: 3]",
+    "and nothing is written while it is open",
+  );
+
+  focusModal.contentEl.all("q-focus-go")[0].click();
+  for (let i = 0; i < 6; i += 1) await flush();
+  focusLines = notes[focusNote].split("\n");
+  assert.equal(
+    focusLines[0],
+    "- [ ] Borrador #task [quadrant:: 1]",
+    "yes takes the mark off the old one, and leaves its card where it is",
+  );
+  assert.equal(
+    focusLines[1].startsWith(`- [ ] Guion #task [quadrant:: 1] [focus:: ${TODAY}T`),
+    true,
+    "and puts it on the new one, in Do now",
+  );
+
+  assert.deepEqual(
+    liveCards(root)
+      .filter((card: any) => card.dataset.path === focusNote)
+      .map((card: any) => card.dataset.line),
+    ["1", "0"],
+    "and the task you are on is the first card of the lane",
+  );
+
+  cardIn(1).all("q-pin")[0].click();
+  for (let i = 0; i < 5; i += 1) await flush();
+  assert.equal(
+    notes[focusNote].split("\n")[1],
+    "- [ ] Guion #task [quadrant:: 1]",
+    "a second click takes the mark off and moves nothing",
+  );
+  assert.deepEqual(
+    liveCards(root)
+      .filter((card: any) => card.dataset.path === focusNote)
+      .map((card: any) => card.dataset.line),
+    ["0", "1"],
+    "and the card goes back to its place as soon as the mark is gone",
+  );
+  assert.equal(root.all("q-focus")[0].hasClass("is-none"), true, "and the board says there is no focus");
+
+  // --- two marks by hand: the board says so, and one command settles it ---
+  // The pin cannot leave two (it clears the old one first). A hand edit or two
+  // devices can, so the header says it out loud, and the command lists them and
+  // clears all but the one you keep — nothing else on the lines moves.
+  const clashNote = "10-journal/daily notes/2026-01-09.md";
+  notes[clashNote] = [
+    `- [ ] Uno #task [quadrant:: 1] [focus:: ${TODAY}T09:00]`,
+    `- [ ] Dos #task [quadrant:: 1] [focus:: ${TODAY}T09:30]`,
+  ].join("\n");
+  await plugin.refresh();
+  assert.equal(root.all("q-focus")[0].hasClass("is-conflict"), true, "two marks at once are said out loud");
+
+  plugin.__commands.find((c: any) => c.id === "clear-extra-focus-marks").callback();
+  await flush();
+  const clashModal = (globalThis as any).__modals.at(-1);
+  assert.equal(clashModal.contentEl.hasClass("q-focus-modal"), true, "and the command shows them before it writes");
+  clashModal.contentEl.all("q-focus-go")[0].click();
+  for (let i = 0; i < 8; i += 1) await flush();
+
+  assert.deepEqual(
+    notes[clashNote].split("\n"),
+    [`- [ ] Uno #task [quadrant:: 1] [focus:: ${TODAY}T09:00]`, "- [ ] Dos #task [quadrant:: 1]"],
+    "the one you keep keeps its mark, and the other loses only that",
+  );
+  assert.equal(root.all("q-focus")[0].hasClass("is-conflict"), false, "and the board is back to one focus");
 
   console.log("plugin: all checks passed", {
     tasks: plugin.tasks.length,

@@ -30,6 +30,8 @@ import {
   applyFinish,
   applyMove,
   archiveBlock,
+  focusStamp,
+  focusTasks,
   isDone,
   laneOf,
   monthOf,
@@ -44,6 +46,7 @@ import {
   todayOf,
   tombstone,
   toggleCondition,
+  withFocus,
   type ArchiveCandidate,
   type ArchivePlan,
   type DoneWindow,
@@ -57,6 +60,8 @@ import {
   BLOCK_LANGUAGE,
   Board,
   BoardModal,
+  FocusConflictModal,
+  FocusModal,
   MatrixView,
   VIEW_TYPE,
   type MatrixHost,
@@ -85,6 +90,8 @@ interface QuadrantSettings {
   excludedFolders: string;
   /** How far back the Done strip looks: 7, 30, or 0 for everything. */
   doneWindow: DoneWindow;
+  /** Whether the three strips at the bottom are closed into one line of counts. */
+  stripsCollapsed: boolean;
   /** Where archived lines go, one file per month. */
   archiveFolder: string;
   /** How many days a finished line has to be old before it may move. */
@@ -100,6 +107,7 @@ const DEFAULT_SETTINGS: QuadrantSettings = {
   plainTaskFolders: "10-journal/daily notes",
   excludedFolders: "10-journal/archive\n80-support/templates",
   doneWindow: 7,
+  stripsCollapsed: false,
   openIn: "sidebar",
   archiveFolder: "10-journal/archive/tareas",
   archiveDays: 30,
@@ -126,6 +134,11 @@ export default class QuadrantPlugin extends Plugin implements MatrixHost {
     return this.settings.doneWindow;
   }
 
+  /** Whether the three strips at the bottom are closed into one line, read by every surface. */
+  get stripsCollapsed(): boolean {
+    return this.settings.stripsCollapsed;
+  }
+
   /** The arrangement of each lane, read by every surface on each draw. */
   get order(): LaneOrder {
     return this.settings.order;
@@ -146,6 +159,9 @@ export default class QuadrantPlugin extends Plugin implements MatrixHost {
     // A `data.json` edited by hand can say anything; a window that is not one
     // of the three would leave the lane unfiltered without saying so.
     if (!DONE_WINDOWS.includes(this.settings.doneWindow)) this.settings.doneWindow = DEFAULT_SETTINGS.doneWindow;
+    if (typeof this.settings.stripsCollapsed !== "boolean") {
+      this.settings.stripsCollapsed = DEFAULT_SETTINGS.stripsCollapsed;
+    }
     if (!PLACEMENTS.some(([value]) => value === this.settings.openIn)) this.settings.openIn = DEFAULT_SETTINGS.openIn;
     this.registerView(VIEW_TYPE, (leaf) => new MatrixView(leaf, this));
     this.registerBlock();
@@ -162,6 +178,7 @@ export default class QuadrantPlugin extends Plugin implements MatrixHost {
     this.addCommand({ id: "refresh", name: "Refresh the matrix", callback: () => { void this.refresh(); } });
     this.addCommand({ id: "archive", name: "Archive finished and dropped tasks...", callback: () => { void this.archiveOldTasks(); } });
     this.addCommand({ id: "rename-quadrant-field", name: "Rename the old quadrant field to [quadrant:: n]", callback: () => { void this.renameQuadrantFieldEverywhere(); } });
+    this.addCommand({ id: "clear-extra-focus-marks", name: "Remove the extra focus marks", callback: () => { void this.clearExtraFocusMarks(); } });
     this.addSettingTab(new QuadrantSettingsTab(this));
     this.registerEvent(this.app.vault.on("modify", () => { this.schedule(); }));
   }
@@ -334,6 +351,18 @@ export default class QuadrantPlugin extends Plugin implements MatrixHost {
     this.redraw();
   }
 
+  /**
+   * Closing the strips is a preference, like the Done window: it changes where
+   * the height goes, so it outlives the session. Opening a board that closed
+   * itself would be a board that ignores you — the counts stay on screen either
+   * way, so being closed never means being forgotten.
+   */
+  toggleStrips(): void {
+    this.settings.stripsCollapsed = !this.settings.stripsCollapsed;
+    void this.saveData(this.settings);
+    this.redraw();
+  }
+
   attach(surface: MatrixSurface): void {
     this.surfaces.add(surface);
   }
@@ -468,6 +497,86 @@ export default class QuadrantPlugin extends Plugin implements MatrixHost {
     const day = todayOf();
     const result = await this.rewrite(task, (raw) => applyFinish(raw, day));
     if (result === "stale") new Notice("That line changed since the board was drawn; nothing was written.");
+    await this.refresh();
+  }
+
+  /**
+   * The pin: puts the session on a task, or takes it off.
+   *
+   * Pinning writes two things in one go — the mark, and the card's place in Do
+   * now/Doing — because a mark on a card still sitting in Backlog says two
+   * contradictory things at once. The board then draws it first in its lane,
+   * because the task you are on is the one you should not have to look for — but
+   * that is drawn from the mark, not written down: the order is never touched.
+   *
+   * `confirmed` is how the dialog says yes: the
+   * first call only asks, and nothing is written until then, because a question
+   * that has already written is not a question.
+   *
+   * Unpinning removes the mark and touches nothing else. The card stays in Do
+   * now on purpose — a task you have just stopped working on is still the one you
+   * are on today — and it goes back to the place it had in that lane as soon as
+   * the mark is gone, because the front was a reading, not a move.
+   */
+  async focusTask(task: MatrixTask, confirmed = false): Promise<void> {
+    if (task.focus !== null) {
+      const result = await this.rewrite(task, (raw) => withFocus(raw, null));
+      if (result === "stale") new Notice("That line changed since the board was drawn; nothing was written.");
+      await this.refresh();
+      return;
+    }
+
+    const current = focusTasks(this.tasks).find(
+      (other) => other.path !== task.path || other.line !== task.line,
+    );
+    if (current !== undefined && !confirmed) {
+      new FocusModal(this.app, current, task, () => { void this.focusTask(task, true); }).open();
+      return;
+    }
+
+    // The old mark goes first, in its own note: if the second write fails, one
+    // task is marked instead of two, and one is a state the board understands.
+    if (current !== undefined) await this.rewrite(current, (raw) => withFocus(raw, null));
+
+    const result = await this.rewrite(task, (raw) => withFocus(applyMove(raw, 1), focusStamp()));
+    if (result === "stale") {
+      new Notice("That line changed since the board was drawn; nothing was written.");
+      await this.refresh();
+      return;
+    }
+
+    // Nothing about the order is written: the board draws the focused card first
+    // in its lane, so the mark is the only thing that says so, and taking it off
+    // puts the card back exactly where it was.
+    await this.refresh();
+  }
+
+  /**
+   * The safety net for marks the pin did not write.
+   *
+   * The pin cannot leave two — it clears the old one before writing the new —
+   * but a hand edit or two devices edited before a sync can. The header says so
+   * in orange, and this is the one place that settles it: it lists the tasks,
+   * you say which one stays, and the others lose the mark and nothing else.
+   */
+  async clearExtraFocusMarks(): Promise<void> {
+    const focused = focusTasks(this.tasks);
+    if (focused.length < 2) {
+      new Notice(focused.length === 1 ? "Quadrant: only one task is in focus." : "Quadrant: no task is in focus.");
+      return;
+    }
+    new FocusConflictModal(this.app, focused, (keep) => { void this.keepOnlyFocus(keep); }).open();
+  }
+
+  /** Clears every mark but `keep`'s, one line at a time, and counts what it did. */
+  private async keepOnlyFocus(keep: MatrixTask): Promise<void> {
+    let cleared = 0;
+    for (const task of focusTasks(this.tasks)) {
+      if (task.path === keep.path && task.line === keep.line) continue;
+      const result = await this.rewrite(task, (raw) => withFocus(raw, null));
+      if (result === "written") cleared += 1;
+    }
+    new Notice(cleared === 1 ? "Quadrant: 1 extra mark removed." : `Quadrant: ${cleared} extra marks removed.`);
     await this.refresh();
   }
 

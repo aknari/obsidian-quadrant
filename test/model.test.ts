@@ -34,6 +34,11 @@ import {
   completedOf,
   doneByDay,
   doneWithin,
+  focusConflicts,
+  focusLabel,
+  focusOf,
+  focusStamp,
+  focusTasks,
   inFolder,
   isDone,
   laneOf,
@@ -48,6 +53,7 @@ import {
   titleParts,
   todayOf,
   toggleCondition,
+  withFocus,
   windowLabel,
   type MatrixTask,
 } from "../src/model";
@@ -81,6 +87,59 @@ check("a plain task keeps its text and its tag apart", [task(PLAIN).title, task(
 check("its quadrant is the matrix field", task(PLAIN).quadrant, null);
 check("a scheduled task keeps the day", task(SCHEDULED).scheduled, "2026-09-18");
 check("and the fields never reach the text", task(SCHEDULED).title, "Revisar el tema 3");
+
+console.log("\nThe focus");
+
+// The mark says *when* a session started, not that there is one: the line
+// carries the clock, so closing the app loses nothing and the value is still
+// readable from anywhere the vault is.
+const FOCUSED = "- [ ] Escribir el guion #task [focus:: 2026-11-09T10:32]";
+check("the mark is the start of the session", focusOf(FOCUSED), "2026-11-09T10:32");
+check("a space is read like the T, and the hour is padded", focusOf("- [ ] X #task [focus:: 2026-11-09 9:05]"), "2026-11-09T09:05");
+check("no mark, no focus", focusOf("- [ ] X #task"), null);
+check("a mark that is not a stamp is not a focus", focusOf("- [ ] X #task [focus:: mañana]"), null);
+check("and the mark never reaches the title", task(FOCUSED).title, "Escribir el guion");
+check("a mark on a finished task is not a session", focusTasks([task("- [x] Hecha #task [focus:: 2026-11-09T10:32]")]).length, 0);
+
+// Two marks at once are a mistake only when neither is a step of the other.
+const PARENT = task("- [ ] Entregable {{operonId:: p1}} [focus:: 2026-11-09T10:00]", 1);
+const CHILD = task("- [ ] Paso {{operonId:: c1}} {{parentTask:: p1}} [focus:: 2026-11-09T10:05]", 2);
+check("a step and its task in focus are one session", focusConflicts([PARENT, CHILD]).length, 0);
+const OTHER = task("- [ ] Otra {{operonId:: o1}} [focus:: 2026-11-09T10:06]", 3);
+check("two unrelated marks contradict each other", focusConflicts([PARENT, OTHER]).map((t) => t.title), ["Entregable", "Otra"]);
+check(
+  "and two plain lines have no chain to prove, so they always do",
+  focusConflicts([
+    task("- [ ] A #task [focus:: 2026-11-09T10:00]", 1),
+    task("- [ ] B #task [focus:: 2026-11-09T10:01]", 2),
+  ]).length,
+  2,
+);
+
+// Minutes only count within the day: a mark from yesterday is not a session.
+check("minutes, in words", focusLabel("2026-11-09T09:58", "2026-11-09", new Date("2026-11-09T10:32")), "34 min");
+check("an hour and a bit", focusLabel("2026-11-09T09:00", "2026-11-09", new Date("2026-11-09T11:05")), "2 h 05");
+check(
+  "a mark from another day says when, and stops counting",
+  focusLabel("2026-11-08T17:04", "2026-11-09", new Date("2026-11-09T10:00")),
+  "desde el 08-11 a las 17:04",
+);
+check("a very long day stops counting too", focusLabel("2026-11-09T08:00", "2026-11-09", new Date("2026-11-09T20:00")), "desde las 08:00");
+
+// The pin writes the mark, and puts it where a person can find it again.
+check("a stamp is the local minute, written the way the vault writes days", focusStamp(new Date("2026-11-09T09:05")), "2026-11-09T09:05");
+check(
+  "the mark goes at the end of the line",
+  withFocus("- [ ] X #task [quadrant:: 2]", "2026-11-09T10:32"),
+  "- [ ] X #task [quadrant:: 2] [focus:: 2026-11-09T10:32]",
+);
+check("an old mark is replaced, not doubled", withFocus(FOCUSED, "2026-11-09T11:00"), "- [ ] Escribir el guion #task [focus:: 2026-11-09T11:00]");
+check(
+  "a mark in the middle of the text comes out of it, without leaving a gap",
+  withFocus("- [ ] Escribir [focus:: 2026-11-09T10:00] el guion #task", "2026-11-09T11:00"),
+  "- [ ] Escribir el guion #task [focus:: 2026-11-09T11:00]",
+);
+check("taking it off leaves the rest of the line as it was", withFocus(FOCUSED, null), "- [ ] Escribir el guion #task");
 check("its quadrant is read", task(SCHEDULED).quadrant, 2);
 check(
   "an Operon task keeps its identity, status and priority",
@@ -340,6 +399,14 @@ check(
 
 console.log("\nFinishing a task");
 
+// A finished task is not what you are on, and the mark must not survive to
+// reappear the day the line is unticked.
+check(
+  "finishing a task takes the focus mark with it",
+  applyFinish("- [ ] Escribir el guion #task [quadrant:: 1] [focus:: 2026-11-09T10:00]", "2026-11-09"),
+  "- [x] Escribir el guion #task [quadrant:: 1] ✅ 2026-11-09",
+);
+
 check(
   "a plain task ticked on the Done lane is ticked and stamped today",
   applyFinish("- [ ] X #task [eisenhower:: 2]", "2026-10-29"),
@@ -372,6 +439,14 @@ check("moving a plain task does not change its identity", taskKey("- [ ] X #task
 check("moving an Operon task does not either", taskKey("- [ ] X {{operonId:: abc}}"), taskKey("- [ ] X [eisenhower:: 4] {{operonId:: abc}}"));
 check("but any other edit does", taskKey("- [ ] X #task") === taskKey("- [ ] X, corregida #task"), false);
 check("the old field and the new one are one identity", taskKey("- [ ] X #task [eisenhower:: 3]"), taskKey("- [ ] X #task [quadrant:: 4]"));
+// The mark is a session, not the task: if it counted as identity, pinning would
+// look like the line becoming another one and the card would lose its place.
+check("and neither is the focus", taskKey("- [ ] X #task"), taskKey("- [ ] X #task [focus:: 2026-11-09T10:32]"));
+check(
+  "so pinning and unpinning keep the same key",
+  taskKey(withFocus("- [ ] X #task [quadrant:: 1]", "2026-11-09T10:32")),
+  taskKey(withFocus(withFocus("- [ ] X #task [quadrant:: 1]", "2026-11-09T10:32"), null)),
+);
 
 console.log("\nRenaming the old field");
 

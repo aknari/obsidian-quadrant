@@ -69,6 +69,10 @@ export interface MatrixTask {
   /** 1–4, 5 for dropped, `null` for a task the matrix has not placed yet. */
   quadrant: number | null;
   tags: string[];
+  /** When the current session on it started, `YYYY-MM-DDTHH:mm`, or `null`. */
+  focus: string | null;
+  /** Operon id of the task this one is a step of, when the line says so. */
+  parentTask: string | null;
   /** The day the task is planned for, as `YYYY-MM-DD`, when the line says so. */
   scheduled: string | null;
   /** The day it was finished — `✅ 2026-10-29` or `{{dateCompleted:: ...}}` — if it says so. */
@@ -123,6 +127,83 @@ export function quadrantOf(raw: string): number | null {
   const value = Number(match[1]);
   if (!Number.isInteger(value)) return null;
   return value >= 1 && value <= DROPPED ? value : null;
+}
+
+/** The mark Quadrant reads to say what you are on: `[focus:: 2026-11-09T10:32]`. */
+const FOCUS = /\[\s*focus\s*::\s*([^\]]*?)\s*\]/u;
+/** Any mark on the line, wherever it sits: pinning moves it to the end. */
+const FOCUS_ANY = /[ \t]*\[\s*focus\s*::[^\]]*\]/gu;
+/** The stamp inside it: a day and the hour it started. A space is read like the `T`. */
+const FOCUS_STAMP = /^(\d{4}-\d{2}-\d{2})[T ](\d{1,2}):(\d{2})$/u;
+
+/**
+ * When the current session on the line started, or `null` when there is no
+ * mark — or the mark is not a stamp, which is not a session either.
+ *
+ * The value is *when*, not a flag: the line itself says how long it has been
+ * going, so nothing else has to keep time for it, and closing the app does not
+ * lose it. The mark and the quadrant are different questions: `[quadrant:: 2]`
+ * is how much it matters, this is what you are on.
+ */
+export function focusOf(raw: string): string | null {
+  const match = FOCUS.exec(raw);
+  if (match === null) return null;
+  const stamp = FOCUS_STAMP.exec(match[1].trim());
+  if (stamp === null) return null;
+  return `${stamp[1]}T${stamp[2].padStart(2, "0")}:${stamp[3]}`;
+}
+
+/** The Operon id of the task this one is a step of, when the line says so. */
+export function parentTaskOf(raw: string): string | null {
+  const id = readField(raw, "parentTask");
+  return id === null || id === "" ? null : id;
+}
+
+/**
+ * The tasks that are in focus: the mark is there **and** the task is still
+ * live. A mark left on a finished line is not a session — it is a line that was
+ * finished while it was marked — and the board does not go on saying you are on
+ * it.
+ */
+export function focusTasks(tasks: MatrixTask[]): MatrixTask[] {
+  return tasks.filter((task) => task.focus !== null && isLive(task));
+}
+
+/**
+ * The marks that contradict each other, under one rule: two at once are only a
+ * mistake when neither is a step of the other. Operon links a step to its task
+ * with `{{parentTask:: id}}`, so the chain can be walked for its lines; a plain
+ * line has no identity and no parent, so two plain marks are always a
+ * contradiction, and the board does not pretend to know better.
+ *
+ * Returns the marked tasks when they conflict, and nothing when they do not.
+ */
+export function focusConflicts(tasks: MatrixTask[]): MatrixTask[] {
+  const focused = focusTasks(tasks);
+  if (focused.length < 2) return [];
+  const byId = new Map<string, MatrixTask>();
+  for (const task of tasks) if (task.operonId !== null) byId.set(task.operonId, task);
+  // A cycle would only exist in hand-edited lines; the cap keeps the walk finite.
+  const ancestors = (task: MatrixTask): Set<string> => {
+    const ids = new Set<string>();
+    let current = task;
+    for (let step = 0; step < 64 && current.parentTask !== null; step += 1) {
+      if (ids.has(current.parentTask)) break;
+      ids.add(current.parentTask);
+      const parent = byId.get(current.parentTask);
+      if (parent === undefined) break;
+      current = parent;
+    }
+    return ids;
+  };
+  for (const candidate of focused) {
+    const chain = ancestors(candidate);
+    const covers = focused.every(
+      (other) => other === candidate || (other.operonId !== null && chain.has(other.operonId)),
+    );
+    if (covers) return [];
+  }
+  return focused;
 }
 
 /** Every inline `[key:: value]` field of the line, key unchanged. */
@@ -402,6 +483,8 @@ export function parseTaskLine(raw: string, path: string, line: number): MatrixTa
     operonStatus: readField(raw, "status"),
     priority: priorityOf(raw),
     quadrant: quadrantOf(raw),
+    focus: focusOf(raw),
+    parentTask: parentTaskOf(raw),
     tags: tagsOf(raw),
     scheduled: scheduledOf(raw, rest),
     completed: completedOf(raw),
@@ -617,6 +700,51 @@ export function todayOf(date = new Date()): string {
   return `${date.getFullYear()}-${month}-${day}`;
 }
 
+/**
+ * How long the session has been going, short enough for a card: `34 min`,
+ * `2 h 05`, `desde las 09:15`.
+ *
+ * Minutes are only counted within the same day. A mark from another day is not
+ * a session any more — nobody works twenty-six hours, and a board opened the
+ * next morning must not claim they did. It says the day and the hour instead,
+ * and stops counting.
+ */
+export function focusLabel(focus: string, today: string, now = new Date()): string {
+  const stamp = FOCUS_STAMP.exec(focus);
+  if (stamp === null) return "";
+  const day = stamp[1];
+  const hour = `${stamp[2].padStart(2, "0")}:${stamp[3]}`;
+  if (day !== today) return `desde el ${day.slice(8)}-${day.slice(5, 7)} a las ${hour}`;
+  const start = new Date(`${day}T${hour}`);
+  const minutes = Math.round((now.getTime() - start.getTime()) / 60000);
+  if (!Number.isFinite(minutes) || minutes < 1) return `desde las ${hour}`;
+  if (minutes < 60) return `${minutes} min`;
+  if (minutes <= 6 * 60) return `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, "0")}`;
+  return `desde las ${hour}`;
+}
+
+/** The focus stamp for a moment, written the way the vault writes dates. */
+export function focusStamp(date = new Date()): string {
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${todayOf(date)}T${hours}:${minutes}`;
+}
+
+/**
+ * The line with its focus mark set to `stamp`, or without one when `stamp` is
+ * null.
+ *
+ * The mark always ends up at the end of the line. An existing one is removed
+ * wherever it is — inside the text is a place the board can read but a person
+ * cannot find — and the rest of the line is left exactly as it was, down to the
+ * spacing between its words.
+ */
+export function withFocus(raw: string, stamp: string | null): string {
+  const rest = raw.replace(FOCUS_ANY, "").replace(/[ \t]+$/u, "");
+  if (stamp === null) return rest;
+  return `${rest} [focus:: ${stamp}]`;
+}
+
 /** `date` (a `YYYY-MM-DD` day) moved by `days`; negative goes back. */
 export function addDays(date: string, days: number): string {
   const [year, month, day] = date.split("-").map(Number);
@@ -742,7 +870,10 @@ export function matchesFilter(task: MatrixTask, filter: MatrixFilter, today: str
 export function taskKey(raw: string): string {
   const id = operonIdOf(raw);
   if (id !== null) return `operon:${id}`;
-  return raw.replace(QUADRANT, "").replace(/\s+/gu, " ").trim();
+  // The focus mark is a session, not the task. Pinning and unpinning must not
+  // read as the line becoming another one, or the card would lose the place it
+  // was given and jump to wherever the automatic order puts it.
+  return raw.replace(QUADRANT, "").replace(FOCUS_ANY, "").replace(/\s+/gu, " ").trim();
 }
 
 /** The line with its quadrant replaced in place, or added at the end. */
@@ -818,14 +949,18 @@ export function setOperonStatus(raw: string, status: string): string {
  * status is what Operon itself reads. The quadrant is left alone: finishing a
  * task does not forget where it was, and unticking it puts it back there.
  * Operon's `{{datetimeModified::}}` is not ours to write.
+ *
+ * The focus mark does go: a finished task cannot be what you are on, and a mark
+ * left behind would come back the day the line is unticked, claiming a session
+ * that ended days before.
  */
 export function applyFinish(raw: string, day: string): string {
   const ticked = setDone(raw);
   if (operonIdOf(raw) !== null) {
     const dated = setOperonField(ticked, "dateCompleted", day);
-    return setOperonStatus(dated, OPERON_FINISHED);
+    return withFocus(setOperonStatus(dated, OPERON_FINISHED), null);
   }
-  return setCompletedStamp(ticked, day);
+  return withFocus(setCompletedStamp(ticked, day), null);
 }
 
 /**

@@ -120,6 +120,11 @@ export class Notice {
   constructor(public message: string) { (globalThis as any).__notices.push(message); }
 }
 
+/** Icons are the app's, not the plugin's: the double only records which one was asked for. */
+export function setIcon(el: FakeEl, icon: string): void {
+  el.setAttr("data-icon", icon);
+}
+
 export class Plugin {
   app: any;
   __ribbon: Array<{ icon: string; title: string; callback: (event?: any) => unknown }> = [];

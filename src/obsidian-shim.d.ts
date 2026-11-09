@@ -176,4 +176,7 @@ declare module "obsidian" {
   export class Notice {
     constructor(message: string, timeout?: number);
   }
+
+  /** Draws one of Obsidian's own icons into an element. */
+  export function setIcon(parent: HTMLElement, iconId: string): void;
 }

@@ -28,7 +28,7 @@ Quadrant is not in Obsidian's community plugin list. Obsidian **1.5.0 or newer**
 - **A focus mark, and a pin.** `[focus:: 2026-11-09T10:32]` on a line says that is what you are on: the card gets a ring, its meta row says `En foco · 34 min`, and the header names it — `Sin foco` in grey when nothing is. Every live card carries a pin, drawn on hover; it writes the mark and moves the card to *Do now/Doing* in the same write. The focused card is drawn first in its lane, from the mark itself: nothing about the order is written, so when the mark comes off the card is back exactly where it was. Pinning another task asks first, then takes the mark off the old one and leaves its card where it is; a second click on the same pin takes the mark off and moves nothing.
 - **A Done strip, as a record.** What you have finished lately, newest first, with the day on each card and seven marks for the last week. Drop a card on it and that task is finished today. The filters above do not apply to it.
 
-The four cells carry their meaning under the name — *urgent · important* and so on — rather than drawn Urgent / Important axes. The first is **Do now/Doing**: what is on your hands, whether it is urgent or simply the thing you are working on. The third is **Backlog**, not *Delegate*: these are your tasks, and handing one to someone else is a note you add, not a drawer the board decides for you.
+The four cells carry their meaning under the name — *urgent · important* and so on — rather than drawn Urgent / Important axes. The first is **Do now/Doing**: what is on your hands, whether it is urgent or simply the thing you are working on. The third is **Later**, not *Delegate*: these are your tasks, and handing one to someone else is a note you add, not a drawer the board decides for you. *Later* is the step between *To do* and *Some day* — work you will take up, but not now; *Some day* is for what may never happen, and nothing breaks if it does not.
 
 **Filters** narrow what is on the board without changing anything: *Overdue*, *Next 7 days* and *Priority S/A* — the two top priorities, whether written as `{{priority:: S}}` or as `🔺` / `⏫`. *Overdue* and *Next 7 days* are one axis, so turning one on turns the other off, and priority is another axis that adds to whichever is on. They live in the plugin, so they survive closing the board and every surface shows the same narrowing. The header says how much of the board you are seeing (`7 of 23 live`) and when it was last read, so **Refresh** is never a button you cannot tell from a broken one.
 
@@ -38,7 +38,7 @@ The four cells carry their meaning under the name — *urgent · important* and 
 
 | Lane | Drop writes |
 | --- | --- |
-| Do now/Doing / To do / Backlog / Some day | `[quadrant:: 1..4]` |
+| Do now/Doing / To do / Later / Some day | `[quadrant:: 1..4]` |
 | Dropped — Operon task | `{{status:: Project.Dropped}}` |
 | Dropped — plain task | `- [-]` and `[quadrant:: 5]` |
 | Unclassified — Operon task that was dropped | back to `{{status:: Project.Planned}}` |

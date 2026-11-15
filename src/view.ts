@@ -43,16 +43,18 @@ export const BLOCK_LANGUAGE = "quadrant";
 
 /**
  * The four cells. No Urgent / Important axes are drawn: the hint under each
- * name says which cell it is, and "Backlog" replaces the usual "Delegate"
+ * name says which cell it is, and "Later" replaces the usual "Delegate"
  * because these are tasks you do yourself — handing one to someone else is a
- * note you add, not a drawer the board decides for you. "Do now/Doing" says
+ * note you add, not a drawer the board decides for you. "Later" says when,
+ * sitting between "To do" and "Some day": work you will take up, just not
+ * now, as opposed to what may never happen at all. "Do now/Doing" says
  * both what the cell is for and what a card in it means: it is what is on your
  * hands, not only what is urgent.
  */
 const QUADRANTS: Array<{ n: number; title: string; hint: string }> = [
   { n: 1, title: "Do now/Doing", hint: "urgent · important" },
   { n: 2, title: "To do", hint: "important · not urgent" },
-  { n: 3, title: "Backlog", hint: "urgent · not important" },
+  { n: 3, title: "Later", hint: "urgent · not important" },
   { n: 4, title: "Some day", hint: "neither urgent nor important" },
 ];
 

@@ -504,7 +504,7 @@ export default class QuadrantPlugin extends Plugin implements MatrixHost {
    * The pin: puts the session on a task, or takes it off.
    *
    * Pinning writes two things in one go — the mark, and the card's place in Do
-   * now/Doing — because a mark on a card still sitting in Backlog says two
+   * now/Doing — because a mark on a card still sitting in Later says two
    * contradictory things at once. The board then draws it first in its lane,
    * because the task you are on is the one you should not have to look for — but
    * that is drawn from the mark, not written down: the order is never touched.
